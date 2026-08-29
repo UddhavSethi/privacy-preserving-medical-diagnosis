@@ -1,0 +1,32 @@
+# Top-level Hydra configuration — the reproducibility spine (CLAUDE.md section 12).
+#
+# Per-component configs (model/, data/, federated/, privacy/, experiment/) are added
+# by the stages that need them; this file only fixes what every run needs regardless
+# of what it trains.
+
+seed: 42
+
+# Tracked separately from `seed` because they are the two values most commonly
+# forgotten in federated-learning experiments, and they dominate run-to-run variance.
+data_partition_seed: 1000
+client_sampling_seed: 2000
+
+deterministic:
+  enabled: true
+  # torch.use_deterministic_algorithms(..., warn_only=warn_only). Flip to true only
+  # when a specific op has no deterministic kernel, and record which one in the run.
+  warn_only: false
+
+mlflow:
+  # MLflow 3.x deprecated the plain filesystem store; sqlite is still fully local
+  # and offline (no third-party service), just no longer the bare `file:` backend.
+  tracking_uri: sqlite:///mlruns.db
+  experiment_name: pneumonia-fl
+
+logging:
+  level: INFO
+  log_dir: outputs/logs
+
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
