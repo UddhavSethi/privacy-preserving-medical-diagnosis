@@ -1,0 +1,5 @@
+{
+  "dataset": "rsna",
+  "status": "skipped",
+  "reason": "no manifest found (RSNA not yet downloaded)"
+}

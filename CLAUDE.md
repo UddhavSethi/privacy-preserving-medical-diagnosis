@@ -566,22 +566,27 @@ touch them.
 | CLAUDE.md (this document) | Done — awaiting owner approval |
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | Not created |
-| Dataset | **Not chosen — pending decision** |
-| Code | None |
+| Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
+| Code | Phase 0 (Stages 0–2) complete; Stage 3 (dataset acquisition) in progress |
 | Docker configuration | None |
-| Tests | None |
+| Tests | 8 passing (Stage 2 reproducibility spine) |
+
+### Resolved decisions
+
+1. **Dataset strategy (resolved 2026-08-29).** Two-source strategy approved: Kermany chest
+   X-ray dataset as Hospital A, RSNA Pneumonia Detection Challenge shards as Hospitals B and
+   C. See `docs/IMPLEMENTATION_PLAN.md` Part IV preface for the label-semantics and
+   Kaggle-access consequences that follow from this choice (Decision Gate DG-2 remains open).
+   **Correction to the acquisition plan:** the Kermany dataset's authoritative source
+   (Mendeley Data, doi:10.17632/rscbjbr9sj.3) no longer offers a standalone chest-X-ray-only
+   download — as of dataset version 3 it is bundled with an unrelated OCT dataset in one
+   ~8.4GB zip (not the ~1.2GB originally estimated from the common Kaggle mirror).
+   `scripts/download_kermany.py` downloads the full archive, verifies it against Mendeley's
+   published SHA-256, and extracts only the `chest_xray/` subtree.
 
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
-1. **Dataset strategy — explicitly not finalized; treat as an open architectural decision.**
-   Candidates under consideration include Kermany (fast, but pediatric-only, single-center,
-   known label noise, unusable official validation split), RSNA Pneumonia Detection Challenge
-   (larger, adult, patient IDs, bounding boxes available), and NIH ChestX-ray14 (large,
-   patient-level splits, heavier compute). A **two-source strategy** — genuinely different
-   datasets acting as different hospitals — is favored for producing real cross-institutional
-   heterogeneity rather than synthetic splits, but **this is not decided.** Do not download or
-   commit to a dataset without approval.
-2. **Dropout placement** for MC Dropout — head-only vs. after dense blocks (§10).
+1. **Dropout placement** for MC Dropout — head-only vs. after dense blocks (§10).
 3. **Target epsilon values** for the DP sweep, and delta relative to dataset size.
 4. **Client count** and default partition scheme for the headline results.
 
