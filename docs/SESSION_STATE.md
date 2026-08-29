@@ -155,13 +155,13 @@ re-asserted by a dedicated test against the live files).
 | 2 — Config, seeding, MLflow tracking | **Done**, 8/8 tests passing | `86e36a7` |
 | 3 — Dataset acquisition & validation | **Done**, both datasets, zero data-integrity issues | `3aea1f0` (Kermany), `74c6ea5` (RSNA) |
 | 4 — Label harmonization & patient-level splitting | **Done** — DG-2 applied, both sources fully patient-grouped, 18 tests passing, splits frozen in `data/partitions/{kermany,rsna}_splits.json` | `28131be` |
-| 5 — Hospital partitioning | **Done.** DG-3 resolved (report both). 29/29 tests passing. | (pending commit this session) |
-| 6 — CLAHE preprocessing + cache | Not started | — |
+| 5 — Hospital partitioning | **Done.** DG-3 resolved (report both). 29/29 tests passing. | `6d667cf` |
+| 6 — CLAHE preprocessing + cache | **Done.** 37/37 tests passing. Full cache built: 5,856 Kermany + 26,684 RSNA images (46GB on local disk, not committed — see §9). MLflow artifact logged (experiment `clahe_cache`). | (pending commit this session) |
 | 7 — torchvision transforms/Dataset/DataLoader | Not started | — |
 | 8–23 | Not started | — |
 
-**Phase 0 (Stages 0–2) and all of Phase 1 (Stages 3–5) are complete. Stage 6 is next
-(first stage of Phase 2, no open decision gates block it).**
+**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), and Phase 2's Stage 6 are
+complete. Stage 7 is next, no open decision gates block it.**
 
 ## 8. Pending decisions / open decision gates
 
@@ -184,13 +184,17 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 9. Known state / things to be aware of (not bugs, but worth knowing)
 
-- **~15.6GB of raw data + archives currently on local disk**, all gitignored, none of
-  it committed: `data/raw/kermany` (1.2G), `data/raw/rsna` (3.8G),
-  `data/_downloads/ZhangLabData.zip` (7.9G, kept for provenance),
-  `data/_downloads/rsna-pneumonia-detection-challenge.zip` (3.7G). Disk has 299GB free
-  as of last check — not urgent, but the two zips can be deleted once you're confident
-  the extracted+checksummed data is sufficient (the manifests retain the source hashes
-  for provenance either way).
+- **~62GB of data on local disk, all gitignored, none of it committed**:
+  `data/raw/kermany` (1.2G), `data/raw/rsna` (3.8G), `data/_downloads/ZhangLabData.zip`
+  (7.9G, kept for provenance), `data/_downloads/rsna-pneumonia-detection-challenge.zip`
+  (3.7G), and **`data/clahe_cache/` (46G — Stage 6's CLAHE output, keyed by
+  `source/param-hash/relative_path.png`, `clip_limit=2.0`/`tile_grid_size=(8,8)`)**.
+  Disk has 252GB free as of last check — not urgent, but the two archive zips can be
+  deleted once you're confident the extracted+checksummed data is sufficient (the
+  manifests retain the source hashes for provenance either way). If CLAHE parameters
+  ever change, re-run `scripts/build_clahe_cache.py` — it writes to a new
+  parameter-hash subdirectory rather than overwriting, so stale cache from an old
+  parameter set will accumulate on disk unless manually cleaned up.
 - **Kermany's official train/test split (this Mendeley source) has no validation
   fold** — resolved by Stage 4's own split, which carves train/val/test from scratch
   across *all* of Kermany's images regardless of the source's original train/test
@@ -213,17 +217,16 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. `28131be` (Stage 4) and `3ae7e78` (Stage 5, natural + Dirichlet
-sweep, pre-DG-3-resolution) are pushed to `origin/main`; the DG-3 "report both"
-follow-up (`hospitals_natural_balanced.json`, `subsample_to_size()`,
-`conf/data/partition_natural_balanced.yaml`, 4 new tests) is about to be committed as
-the next commit on top of that. Check `git log --oneline -5` on resume — this file is
-not re-updated after every single commit within a session, only at natural pause points.
+**Branch:** `main`. `6d667cf` (Stage 5, DG-3 resolved) is pushed to `origin/main`;
+Stage 6 (`src/data/preprocessing.py`, `scripts/build_clahe_cache.py`,
+`tests/test_preprocessing.py`, this file's update) is about to be committed as the next
+commit on top of that. Check `git log --oneline -5` on resume — this file is not
+re-updated after every single commit within a session, only at natural pause points.
 
 ```
+6d667cf Stage 5 complete: DG-3 resolved as "report both"
 3ae7e78 Stage 5: hospital partitioning code + natural/Dirichlet outputs (DG-3 open)
 28131be Stage 4: label harmonization and patient-grouped splitting (DG-2 applied)
-d330dbd Add docs/SESSION_STATE.md for cross-session continuity
 74c6ea5 Stage 3 complete: RSNA acquired, checksummed, validated (DICOM)
 3aea1f0 Stage 3 (partial): Kermany acquisition, checksummed and validated
 4ab5922 Stage 1: pinned Python 3.11 environment (ADR-5)
@@ -231,17 +234,20 @@ d330dbd Add docs/SESSION_STATE.md for cross-session continuity
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
 downloads, commits, pushes) — stopping only at decision gates or genuine architecture
-conflicts. Not yet confirmed whether this extends past Phase 1; ask if a fresh session
-is unsure before pushing through a later phase boundary unprompted.
+conflicts. Phase 2 (Stage 6) proceeded on repeated one-word "continue" replies rather
+than a fresh explicit autonomy grant — treated as continued authorization by the same
+session, but a **fresh session should not assume this transfers automatically**; if
+unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-Phase 1 is complete. Next is **Stage 6 — OpenCV CLAHE preprocessing and cache** (ADR-6):
-`src/data/preprocessing.py` (fixed, logged `clipLimit`/`tileGridSize`; explicit BGR→RGB
-conversion — the "invisible failure" ADR-6 warns about) and `scripts/build_clahe_cache.py`
-(disk cache keyed by image id + a hash of the CLAHE parameters, so preprocessing isn't a
-per-epoch bottleneck or nondeterminism source). Required test: BGR→RGB correctness via a
-synthetic asymmetric-color image; CLAHE output byte-identical across runs given fixed
-parameters. No open decision gates block this stage. Note RSNA's DICOMs need conversion
-to 8-bit before CLAHE (OpenCV CLAHE expects standard image arrays, not raw DICOM/pydicom
-output) — this conversion choice should be fixed and logged per Stage 6's own risk note.
+Phase 1 and Stage 6 are complete. Next is **Stage 7 — torchvision transforms, Dataset
+and DataLoader**: `src/data/transforms.py` (train/eval transform pipelines — resize to
+224, ImageNet normalization, seeded augmentation), `src/data/datasets.py` (a Dataset
+reading from `data/clahe_cache/` rather than raw images — the cache built in Stage 6 is
+the read path from here on), `conf/data/transforms.yaml`. Use
+`src/utils/seeding.py::seed_worker` / `make_generator` (Stage 2) for the DataLoader, not
+ad-hoc seeding. Required tests: batch shapes/dtypes/value ranges correct; normalization
+statistics verified; augmentation reproducible under a fixed seed; no leakage of
+training-time augmentation into evaluation transforms. No open decision gates block
+this stage.
