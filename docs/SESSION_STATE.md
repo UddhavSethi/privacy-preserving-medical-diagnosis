@@ -26,7 +26,9 @@ ablation table quantifying what each privacy layer costs (`CLAUDE.md` §11.1).
   demonstration) — ADR-8.
 - **Model:** DenseNet121, ImageNet-pretrained, **frozen backbone** (BatchNorm in
   `eval()`, frozen running stats) + small trainable head — **ADR-1, the load-bearing
-  decision of the whole project**. Not yet implemented (Stage 8).
+  decision of the whole project**. Implemented and validated in Stage 8
+  (`src/models/densenet_head.py`) — Opacus accepts it cleanly, 262,914 trainable
+  params, 0.37GB/4GB VRAM for one DP-SGD step. No training loop exists yet (Stage 11+).
 - **Privacy stack:** Opacus DP-SGD (sample-level, per-client/local DP — ADR-2) +
   Flower SecAgg+ (ADR-3, no custom crypto) + TLS with client auth (ADR-4). None of
   this is implemented yet — Stages 14–16.
@@ -157,12 +159,35 @@ re-asserted by a dedicated test against the live files).
 | 4 — Label harmonization & patient-level splitting | **Done** — DG-2 applied, both sources fully patient-grouped, 18 tests passing, splits frozen in `data/partitions/{kermany,rsna}_splits.json` | `28131be` |
 | 5 — Hospital partitioning | **Done.** DG-3 resolved (report both). 29/29 tests passing. | `6d667cf` |
 | 6 — CLAHE preprocessing + cache | **Done.** 37/37 tests passing. Full cache built: 5,856 Kermany + 26,684 RSNA images (46GB on local disk, not committed — see §9). MLflow artifact logged (experiment `clahe_cache`). | `91d7da8` |
-| 7 — torchvision transforms/Dataset/DataLoader | **Done.** 48/48 tests passing. Smoke-tested end-to-end on real cached data from both sources, including multi-worker DataLoader. | (pending commit this session) |
-| 8–23 | Not started | — |
+| 7 — torchvision transforms/Dataset/DataLoader | **Done.** 48/48 tests passing. Smoke-tested end-to-end on real cached data from both sources, including multi-worker DataLoader. | `dda0bed` |
+| 8 — DenseNet121 frozen backbone + head | **Done — ADR-1's premise fully validated, no GroupNorm fallback needed.** 57/57 tests passing (9 new). See note below the table. | (pending commit this session) |
+| 9–23 | Not started | — |
 
-**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), and Phase 2's Stages 6–7 are
-complete. Stage 8 is next — see §11, this is the single largest technical-risk stage
-in the whole project.**
+**Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
+on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
+`conf/model/densenet121.yaml`):
+- Opacus's `ModuleValidator` accepts the frozen-backbone model outright (0 errors).
+- Per-sample gradients compute correctly for exactly the 4 head parameters (2 Linear
+  layers' weights/biases); 0 backbone parameters tracked.
+- All 121 BatchNorm layers' running stats provably unchanged after a training step,
+  even after calling `.train()` on the whole model (the `DenseNet121Head.train()`
+  override is what makes that permanent).
+- CUDA VRAM spike test: one DP-SGD-style step at batch_size=32 uses **0.37GB of the
+  4GB RTX 3050 budget** — an 11x margin, not a near-miss.
+- Trainable parameters: **262,914** (head: `Linear(1024,256) -> ReLU -> Dropout ->
+  Linear(256,2)`), squarely in the plan's expected ~1e5-1e6 range. Total: ~7.2M,
+  confirming the backbone itself is intact.
+- **Dropout placement resolved: head-only** (a single `Dropout(p=0.3)` between the
+  head's hidden ReLU and final classification layer) — this closes CLAUDE.md §14's
+  previously-open pending decision. Tradeoff accepted: MC Dropout (Stage 19) will only
+  capture last-layer uncertainty, not backbone-level uncertainty.
+- **One real bug found and fixed during validation, not by inspection**: the head's
+  `nn.ReLU(inplace=True)` broke Opacus's `GradSampleModule` backward hooks (in-place
+  ops conflict with its view-tracking) — changed to `inplace=False`. Worth remembering
+  if any future model code adds in-place ops anywhere in a path Opacus wraps.
+
+**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), and Phase 2's Stages 6–8 are
+complete. Stage 9 is next.**
 
 ## 8. Pending decisions / open decision gates
 
@@ -218,19 +243,20 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. `91d7da8` (Stage 6) is pushed to `origin/main`; Stage 7
-(`src/data/transforms.py`, `src/data/datasets.py`, `conf/data/transforms.yaml`,
-`tests/test_transforms.py`, `tests/test_datasets.py`, this file's update) is about to
-be committed as the next commit on top of that. Check `git log --oneline -5` on
-resume — this file is not re-updated after every single commit within a session, only
-at natural pause points.
+**Branch:** `main`. `dda0bed` (Stage 7) is pushed to `origin/main`; Stage 8
+(`src/models/densenet_head.py`, `src/models/freezing.py`,
+`conf/model/densenet121.yaml`, `tests/test_densenet_head.py`, this file's update, and a
+CLAUDE.md §14 edit resolving the dropout-placement pending decision) is about to be
+committed as the next commit on top of that. Check `git log --oneline -5` on resume —
+this file is not re-updated after every single commit within a session, only at
+natural pause points.
 
 ```
+dda0bed Stage 7: torchvision transforms, Dataset and DataLoader
 91d7da8 Stage 6: OpenCV CLAHE preprocessing and cache (ADR-6)
 6d667cf Stage 5 complete: DG-3 resolved as "report both"
 3ae7e78 Stage 5: hospital partitioning code + natural/Dirichlet outputs (DG-3 open)
 28131be Stage 4: label harmonization and patient-grouped splitting (DG-2 applied)
-74c6ea5 Stage 3 complete: RSNA acquired, checksummed, validated (DICOM)
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -242,37 +268,33 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-Phase 1 and Stages 6–7 are complete (`src/data/transforms.py` — separate
-`build_train_transform`/`build_eval_transform`, no horizontal flip since chest X-ray
-laterality is clinically meaningful; `src/data/datasets.py` — `ChestXrayDataset` +
-`build_dataloader` reading from `data/clahe_cache/`; smoke-tested end-to-end on real
-data from both sources including multi-worker loading).
+Stage 8 is complete and ADR-1 is fully validated (see the note under §7's table) — the
+project's single largest technical-risk stage is retired. No fallback needed.
 
-Next is **Stage 8 — DenseNet121 frozen backbone + trainable head**, marked in the plan
-as **the single largest technical risk in the project** and a **CRITICAL GATE (DG-4,
-DG-6)**. This is where ADR-1 (freeze the backbone, train only a small head) either
-gets proven out or fails and triggers the GroupNorm fallback — do this validation now,
-not later, because failure here is cheap and failure discovered downstream (e.g. at
-Stage 14's DP integration) is not.
+**Stage 9 — frozen-backbone feature cache is next, but it is `REC` (recommended, not
+required) and carries its own open decision gate, DG-5 — do not build it silently.**
+Because the backbone is now frozen and validated, its 1024-dim output can be
+precomputed once per image and the head trained on cached features instead of running
+the full DenseNet121 forward pass every step — likely a 10-100x head-training speedup,
+which is what makes the full ablation campaign (6 configs x multiple epsilons x 3+
+seeds) realistically finish on a 4GB laptop GPU. Full-image forward passes would still
+be used for inference and Grad-CAM (Stage 18), which need the real image, not cached
+features.
 
-What it needs: `src/models/densenet_head.py`, `src/models/freezing.py`,
-`conf/model/densenet121.yaml`. Build an ImageNet-pretrained DenseNet121 with the
-backbone frozen (BatchNorm forced to `eval()`, running stats frozen) and a small
-trainable classifier head with deliberately inserted dropout (this also resolves
-CLAUDE.md §14's still-open "dropout placement" pending decision — head-only vs. after
-dense blocks — so that choice needs to be made and documented as part of this stage,
-not silently defaulted).
+**DG-5, to raise with the owner before implementing:** cache without augmentation loses
+regularization on Kermany's already-small data; caching K augmented views instead costs
+K times the storage (modest here — plan estimates ~600MB for 5 views across ~36K
+images, trivial against the 252GB free). Recommend caching K=5 views (report both no-
+augmentation and K-views options if the owner wants to compare) — but this should be
+asked, not assumed, the same way DG-2/DG-3 were.
 
-**The stage's entire point is its acceptance tests, not just building the model:**
-1. `opacus.validators.ModuleValidator` accepts the frozen-backbone model (already
-   confirmed importable in Stage 1; this is the real test — does it pass validation).
-2. Per-sample gradients compute correctly, and only for head parameters.
-3. BatchNorm running statistics are provably unchanged after a training step.
-4. A spike test: one DP-SGD step fits within the 4GB VRAM budget (RTX 3050) at the
-   intended batch size.
-5. Trainable parameter count lands in the expected ~1e5–1e6 range (not ~7M).
+Files if approved: `src/data/feature_cache.py`, `scripts/build_feature_cache.py`.
+Required tests: cached features match a live forward pass within floating-point
+tolerance; head training on the cache matches training on images (same seed,
+augmentation disabled) within tolerance; the measured speedup is recorded.
 
-**If any of this fails**, the ADR-1 fallback (Opacus `ModuleValidator.fix()` to
-GroupNorm, fine-tune more layers) requires explicit owner approval before adopting —
-do not silently switch to it. This is exactly the kind of "requires changing approved
-architecture" situation that should stop and ask, not proceed autonomously.
+**If Stage 9 is skipped or deferred**, the next required (`REQ`) stage is **Stage 10 —
+evaluation and metrics module** (`src/evaluation/metrics.py`, `bootstrap.py`,
+`reporting.py`): AUROC-primary metric suite, bootstrap 95% CIs, multi-seed
+mean/std aggregation. Build this before any baseline (Stage 11) produces a number —
+CLAUDE.md explicitly warns that building it after is "the classic mistake."
