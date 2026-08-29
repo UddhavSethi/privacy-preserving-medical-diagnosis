@@ -1,6 +1,6 @@
 {
   "scheme": "natural",
-  "note": "Full natural imbalance \u2014 Hospital A (Kermany) is far smaller than B/C (RSNA shards). This is DG-3's 'keep the natural imbalance' option; a size-balanced variant is a separate, not-yet-built config pending owner input (CLAUDE.md section 14).",
+  "note": "Full natural imbalance \u2014 Hospital A (Kermany) is far smaller than B/C (RSNA shards). DG-3 resolution: report both this and the size-balanced variant (hospitals_natural_balanced.json) \u2014 this is the unbalanced half.",
   "rsna_shard_seed": 1000,
   "summary": {
     "A": {

@@ -16,6 +16,7 @@ intentionally left untouched so the already-committed, frozen
 """
 from __future__ import annotations
 
+import random
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -36,8 +37,6 @@ def natural_shard_rsna(records: list[dict], seed: int = 1000) -> dict[str, list[
     patients_by_label: dict[str, list[str]] = defaultdict(list)
     for pid, label in patient_label.items():
         patients_by_label[label].append(pid)
-
-    import random
 
     rng = random.Random(seed)
     shard_of_patient: dict[str, str] = {}
@@ -101,6 +100,56 @@ def dirichlet_partition(
         for pid in patients:
             result[name].extend(by_patient[pid])
     return result
+
+
+def subsample_to_size(
+    records: list[dict],
+    target_num_images: int,
+    seed: int = 1500,
+) -> list[dict]:
+    """Patient-grouped, label-stratified subsample down to ~target_num_images images.
+
+    Used for DG-3's "report both" resolution: the natural partition (see
+    `natural_shard_rsna`) is kept as the unbalanced headline, and this produces a
+    size-balanced companion by shrinking the larger hospitals rather than growing the
+    smaller one (no synthetic/duplicated data). Sampling is patient-grouped (a
+    patient's images are taken or left together) and stratified per label so the
+    hospital's original class balance is preserved in the subsample.
+
+    If `target_num_images` is at or above the input's size, returns all records
+    unchanged (never upsamples).
+    """
+    by_patient: dict[str, list[dict]] = defaultdict(list)
+    patient_label: dict[str, str] = {}
+    for r in records:
+        pid = r["patient_id"]
+        by_patient[pid].append(r)
+        patient_label[pid] = r["label"]
+
+    total_images = len(records)
+    if target_num_images >= total_images:
+        return list(records)
+
+    patients_by_label: dict[str, list[str]] = defaultdict(list)
+    label_image_counts: dict[str, int] = defaultdict(int)
+    for pid, recs in by_patient.items():
+        label = patient_label[pid]
+        patients_by_label[label].append(pid)
+        label_image_counts[label] += len(recs)
+
+    rng = random.Random(seed)
+    kept: list[dict] = []
+    for label, patients in sorted(patients_by_label.items()):
+        label_target = round(target_num_images * (label_image_counts[label] / total_images))
+        patients = sorted(patients)
+        rng.shuffle(patients)
+        running = 0
+        for pid in patients:
+            if running >= label_target:
+                break
+            kept.extend(by_patient[pid])
+            running += len(by_patient[pid])
+    return kept
 
 
 def assert_no_patient_overlap_across_hospitals(hospitals: dict[str, list[dict]]) -> None:

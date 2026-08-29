@@ -6,8 +6,7 @@ document — this file is a status snapshot, not a replacement for it. Read `CLA
 and `docs/IMPLEMENTATION_PLAN.md` in full before acting; this is a pointer/summary layer
 on top of them.
 
-**Last updated:** 2026-08-29, Stage 5 code complete, awaiting DG-3 for the final headline
-partition choice.
+**Last updated:** 2026-08-29, end of Phase 1 / Stage 5. Phase 1 (Stages 3-5) is complete.
 
 ---
 
@@ -156,24 +155,23 @@ re-asserted by a dedicated test against the live files).
 | 2 — Config, seeding, MLflow tracking | **Done**, 8/8 tests passing | `86e36a7` |
 | 3 — Dataset acquisition & validation | **Done**, both datasets, zero data-integrity issues | `3aea1f0` (Kermany), `74c6ea5` (RSNA) |
 | 4 — Label harmonization & patient-level splitting | **Done** — DG-2 applied, both sources fully patient-grouped, 18 tests passing, splits frozen in `data/partitions/{kermany,rsna}_splits.json` | `28131be` |
-| 5 — Hospital partitioning | **Code complete, 25/25 tests passing.** Natural partition (Kermany=A, RSNA→B/C, full imbalance) and a Dirichlet alpha-sweep demo are built and on disk. **DG-3 (below) is open — do not treat this stage as finished/committed until it's answered**, since the answer may add a size-balanced variant alongside the natural one. | (uncommitted) |
+| 5 — Hospital partitioning | **Done.** DG-3 resolved (report both). 29/29 tests passing. | (pending commit this session) |
 | 6 — CLAHE preprocessing + cache | Not started | — |
 | 7 — torchvision transforms/Dataset/DataLoader | Not started | — |
 | 8–23 | Not started | — |
 
-**Phase 0 (Stages 0–2) and Phase 1's Stages 3–4 are complete. Stage 5's code is written
-and its natural/Dirichlet outputs generated, but not yet committed — blocked on DG-3.**
+**Phase 0 (Stages 0–2) and all of Phase 1 (Stages 3–5) are complete. Stage 6 is next
+(first stage of Phase 2, no open decision gates block it).**
 
 ## 8. Pending decisions / open decision gates
 
 - **DG-2 (label harmonization): RESOLVED and applied**, see §4.
-- **DG-3 (hospital-size imbalance handling, Stage 5): OPEN, blocking.** Measured (not
-  estimated) via `scripts/build_partitions.py`: natural partition gives Hospital A
-  (Kermany) 5,856 images / 3,081 patients vs. Hospitals B and C (RSNA shards) 13,342
-  images / 13,342 patients **each** — roughly 4.5x. The plan's own recommendation is to
-  report both the natural-imbalance and a size-balanced variant rather than picking
-  one, but this has not been put to the owner as an explicit choice yet — do that
-  before treating Stage 5 as finished.
+- **DG-3 (hospital-size imbalance handling, Stage 5): RESOLVED 2026-08-29** — owner
+  chose "report both". `hospitals_natural.json` (A=5,856/B=C=13,342 images, ~4.5x
+  imbalance) and `hospitals_natural_balanced.json` (A=B=C=5,856 images, B/C
+  label-stratified-subsampled down via `src/data/partitioning.py::subsample_to_size()`,
+  never upsampling A) are both frozen and committed. Both should appear in the ablation
+  results/paper.
 - **Dropout placement** (head-only vs. after dense blocks, `CLAUDE.md` §14 item, needed
   at Stage 8): open.
 - **Target epsilon values** for the DP sweep + delta relative to dataset size (needed
@@ -215,20 +213,19 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. As of writing, `74c6ea5` (Stage 3) plus a follow-up docs-only commit
-(`d330dbd`, this file's first version) are pushed to `origin/main`; Stage 4's code
-(`src/data/labels.py`, `src/data/splitting.py`, `scripts/build_splits.py`,
-`data/partitions/{kermany,rsna}_splits.json`, `tests/test_labels.py`,
-`tests/test_splitting.py`) plus the `CLAUDE.md`/`docs/IMPLEMENTATION_PLAN.md` DG-2 and
-Kermany-patient-ID corrections are about to be committed as the next commit on top of
-that. Check `git log --oneline -5` on resume — this file is not re-updated after every
-single commit within a session, only at natural pause points.
+**Branch:** `main`. `28131be` (Stage 4) and `3ae7e78` (Stage 5, natural + Dirichlet
+sweep, pre-DG-3-resolution) are pushed to `origin/main`; the DG-3 "report both"
+follow-up (`hospitals_natural_balanced.json`, `subsample_to_size()`,
+`conf/data/partition_natural_balanced.yaml`, 4 new tests) is about to be committed as
+the next commit on top of that. Check `git log --oneline -5` on resume — this file is
+not re-updated after every single commit within a session, only at natural pause points.
 
 ```
+3ae7e78 Stage 5: hospital partitioning code + natural/Dirichlet outputs (DG-3 open)
+28131be Stage 4: label harmonization and patient-grouped splitting (DG-2 applied)
 d330dbd Add docs/SESSION_STATE.md for cross-session continuity
 74c6ea5 Stage 3 complete: RSNA acquired, checksummed, validated (DICOM)
 3aea1f0 Stage 3 (partial): Kermany acquisition, checksummed and validated
-86e36a7 Stage 2: configuration, seeding and MLflow tracking
 4ab5922 Stage 1: pinned Python 3.11 environment (ADR-5)
 ```
 
@@ -239,14 +236,12 @@ is unsure before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-Stage 5's code, tests, configs, natural partition, and Dirichlet-sweep demo are all
-built (see §7) but the resulting **DG-3 question has been put to the owner and is
-awaiting an answer**: keep the natural ~4.5x imbalance as the headline result, add a
-size-balanced variant (e.g. subsample RSNA shards down toward Kermany's size) as an
-additional config, or report both. Once answered:
-
-1. If a balanced variant is wanted, add it to `src/data/partitioning.py` /
-   `scripts/build_partitions.py` and regenerate.
-2. Commit Stage 5 (code + whichever partition JSON(s) are wanted) and update this file.
-3. Move to Stage 6 (OpenCV CLAHE preprocessing + cache, ADR-6) — first REQUIRED stage
-   of Phase 2, no open decision gates block it.
+Phase 1 is complete. Next is **Stage 6 — OpenCV CLAHE preprocessing and cache** (ADR-6):
+`src/data/preprocessing.py` (fixed, logged `clipLimit`/`tileGridSize`; explicit BGR→RGB
+conversion — the "invisible failure" ADR-6 warns about) and `scripts/build_clahe_cache.py`
+(disk cache keyed by image id + a hash of the CLAHE parameters, so preprocessing isn't a
+per-epoch bottleneck or nondeterminism source). Required test: BGR→RGB correctness via a
+synthetic asymmetric-color image; CLAHE output byte-identical across runs given fixed
+parameters. No open decision gates block this stage. Note RSNA's DICOMs need conversion
+to 8-bit before CLAHE (OpenCV CLAHE expects standard image arrays, not raw DICOM/pydicom
+output) — this conversion choice should be fixed and logged per Stage 6's own risk note.
