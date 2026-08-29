@@ -162,8 +162,9 @@ re-asserted by a dedicated test against the live files).
 | 7 — torchvision transforms/Dataset/DataLoader | **Done.** 48/48 tests passing. Smoke-tested end-to-end on real cached data from both sources, including multi-worker DataLoader. | `dda0bed` |
 | 8 — DenseNet121 frozen backbone + head | **Done — ADR-1's premise fully validated, no GroupNorm fallback needed.** 57/57 tests passing (9 new). See note below the table. | `80f533d` |
 | 9 — Frozen-backbone feature cache | **Done.** DG-5 resolved (K=5 augmented views). 62/62 tests passing (5 new). Full cache built and measured — see note below the table. | `dfb1d9f` |
-| 10 — Evaluation and metrics module | **Done.** 85/85 tests passing (23 new). No open decision gates. See note below the table. | (pending commit this session) |
-| 11–23 | Not started | — |
+| 10 — Evaluation and metrics module | **Done.** 85/85 tests passing (23 new). No open decision gates. See note below the table. | `ece7535` |
+| 11 — Local single-hospital baseline (ablation row 1) | **Done.** 94/94 tests passing (8 new + 1 partitioning regression test). Real results below — no architecture concerns triggered. | (pending commit this session) |
+| 12–23 | Not started | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -233,8 +234,52 @@ on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
   land in a queryable run.
 - 23 new tests (85 total), all passing.
 
-**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), and Phase 2's Stages 6–10 are
-complete. Stage 11 is next — the first stage that actually trains anything.**
+**Real bug found and fixed before Stage 11 could produce valid results (committed
+separately, `099e320`):** `natural_shard_rsna` (Stage 5) defaulted to `seed=1000`,
+identical to `data_partition_seed` — the seed Stage 4's `grouped_stratified_split`
+already used on this exact patient population. Both sort-then-`random.Random(seed)`
+-shuffle, so the same seed reproduces the identical permutation; cutting it in half
+for Hospitals B/C silently reproduced Stage 4's test/val/train cut points instead of
+an independent split. **Symptom: Hospital C had zero val/test records (100% train);
+Hospital B absorbed all of RSNA's val+test.** Fixed by changing
+`RSNA_SHARD_SEED` to 5000 in `scripts/build_partitions.py`, regenerating both
+`hospitals_natural{,_balanced}.json` (total per-hospital image counts unchanged, only
+internal split composition was wrong), and adding a regression test
+(`tests/test_partitioning.py::test_natural_shard_proportional_across_upstream_split_when_seed_differs`)
+that exercises the real `grouped_stratified_split` + `natural_shard_rsna` together.
+**General lesson recorded in `natural_shard_rsna`'s docstring**: any function using
+this sort-then-seed-shuffle pattern must use a seed independent of any prior split's
+seed applied to the same population — worth checking if this pattern is reused again
+later in the project (e.g. Stage 13's client sampling).
+
+**Stage 11 (`src/training/trainer.py`, `scripts/train_local.py`,
+`conf/experiment/local.yaml`) — real results, 3 seeds each, on cached features:**
+
+| Partition | Hospital | Test AUROC (mean ± std) |
+|---|---|---|
+| natural | A (Kermany) | 0.9849 ± 0.0005 |
+| natural | B (RSNA shard) | 0.8339 ± 0.0004 |
+| natural | C (RSNA shard) | 0.8584 ± 0.0007 |
+| balanced | A (Kermany) | 0.9849 ± 0.0005 (unchanged — A was never subsampled) |
+| balanced | B (RSNA shard) | 0.8204 ± 0.0013 |
+| balanced | C (RSNA shard) | 0.8505 ± 0.0011 |
+
+All well above chance and with tight seed variance — **no ADR-1/GroupNorm-fallback
+concern triggered**, so this was not raised as an architecture question. Kermany
+outperforms RSNA noticeably, plausibly reflecting DG-2's accepted clinical caveat
+(RSNA's negative class mixes true-Normal with abnormal-but-not-pneumonia) plus
+Kermany's cleaner pediatric single-center population being an easier separation task.
+The balanced regime's RSNA hospitals score marginally lower than natural's — smaller
+training set, as expected from DG-3's tradeoff.
+
+Class imbalance handled via inverse-frequency loss weighting (not oversampling — no
+data duplication needed). Checkpoints: `outputs/checkpoints/local_baseline/` (18
+files, gitignored). Full results: `outputs/results/local_baseline.json` (gitignored —
+MLflow, experiment `local_baseline`, is the authoritative record; the JSON is a local
+convenience export). 8 new trainer tests + 1 partitioning regression test (94 total).
+
+**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), and Phase 2's Stages 6–11 are
+complete. Stage 12 (centralized pooled baseline, ablation row 2) is next.**
 
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
@@ -305,14 +350,16 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. `dfb1d9f` (Stage 9) is pushed to `origin/main`; Stage 10
-(`src/evaluation/{metrics,bootstrap,reporting}.py`,
-`tests/test_{metrics,bootstrap,reporting}.py`, this file's update) is about to be
-committed as the next commit on top of that. Check `git log --oneline -5` on resume —
-this file is not re-updated after every single commit within a session, only at
-natural pause points.
+**Branch:** `main`. `099e320` (RSNA shard-seed bug fix) is pushed to `origin/main`;
+Stage 11 (`src/training/trainer.py`, `scripts/train_local.py`,
+`conf/experiment/local.yaml`, `tests/test_trainer.py`, this file's update) is about to
+be committed as the next commit on top of that. Check `git log --oneline -5` on
+resume — this file is not re-updated after every single commit within a session, only
+at natural pause points.
 
 ```
+099e320 Fix: RSNA shard split (Stage 5) reused Stage 4's split seed, correlating shard membership with train/val/test membership
+ece7535 Stage 10: evaluation and metrics module
 dfb1d9f Stage 9: frozen-backbone feature cache — DG-5 resolved (K=5 views)
 5b52bc0 Record OPT-5 (Isolation Forest OOD gate) and OPT-6 (Streamlit demo) as approved-in-concept optional extensions
 80f533d Stage 8: DenseNet121 frozen backbone + head — ADR-1 validated
@@ -329,33 +376,40 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-Stages 8, 9 and 10 are all complete. ADR-1 validated, feature cache built (8.3x
-speedup), and one trusted metrics module exists that every later stage will report
-through. No open decision gates remain in Phases 0–2.
+Stages 8–11 are all complete. ADR-1 validated, feature cache built, metrics module in
+place, and the local baseline trained real, healthy numbers (0.82–0.98 AUROC across
+hospitals — see the table under §7's Stage 11 note) with **no architecture concern
+triggered**. No open decision gates remain in Phases 0–2.
 
-Next is **Stage 11 — local single-hospital baseline** (`REQ`, **ablation row 1**) — the
-first stage that actually trains anything and produces a real number, and worth
-approaching carefully:
+Next is **Stage 12 — centralized pooled baseline** (`REQ`, **ablation row 2**) — the
+privacy-free ceiling every later federated/private result gets compared against, and
+the last stage of Phase 2.
 
-**What it needs:** `src/training/trainer.py` (non-federated head-training loop — should
-consume Stage 9's feature cache, not raw images, given the 8.3x speedup that unlocks),
-`scripts/train_local.py`, `conf/experiment/local.yaml`. Explicit class-imbalance
-handling (weighted loss or sampling — CLAUDE.md requires the choice be recorded, not
-left implicit; both Kermany (train: 1,349 Normal / 3,883 Pneumonia) and RSNA's natural
-partition (Normal-heavy) are imbalanced, in *opposite* directions, worth noting).
-Checkpointing. Independent runs for Hospitals A, B, C — and per DG-3's "report both"
-resolution, this likely means running against **both** `hospitals_natural.json` and
-`hospitals_natural_balanced.json`, not just one.
+**What it needs:** pool all hospitals' train data together (for each of the natural
+and balanced partition regimes — reuse `src/training/trainer.py`, don't fork it),
+train under the identical protocol as Stage 11 (same architecture, same
+hyperparameters, same 3 seeds, same class-imbalance handling). `scripts/train_centralized.py`,
+`conf/experiment/centralized.yaml`.
 
-**Required tests/validation:** loss decreases over training; AUROC meaningfully above
-0.5 (use Stage 10's `compute_metrics`); **3-seed variance reported** (CLAUDE.md §11.2 —
-single-run numbers aren't credible); overfitting checked against the val split; results
-land in MLflow (Stage 2's `tracked_run`).
+**The evaluation-set question this stage must get right, per its own flagged risk**
+(*"this row must use exactly the same evaluation set and protocol as every other
+row, or the entire ablation table is meaningless"*): Stage 11 evaluated each hospital
+on **its own** test set. The centralized model should be evaluated on the **pooled
+test set** (all hospitals' test data combined) as the primary number, since that's
+the fair global comparison point — and reporting per-hospital breakdowns on the same
+centralized model alongside it is worth doing too, since it directly shows whether
+pooling helps hospitals unevenly.
 
-**Real risk, flagged in the plan itself, worth taking seriously:** *"Frozen-backbone
-accuracy may disappoint; this stage reveals whether ADR-1's accuracy cost is acceptable
-or whether the GroupNorm fallback conversation is required."* If AUROC comes back weak
-after this stage actually trains something, **that is exactly the kind of "requires
-changing approved architecture" situation that should stop and ask the owner**, not a
-cue to unilaterally start tuning around it or switching to the GroupNorm fallback.
-Report the honest number first.
+**Required tests/validation:** identical test set to rows 1 and 3–6; 3 seeds;
+**sanity check from the plan itself: centralized AUROC should be ≥ each local
+model's** — if it isn't, that signals a label-harmonization or partitioning defect,
+not just a modeling quirk, and should be investigated rather than silently reported.
+This uses the same "stop and ask before changing architecture" boundary as Stage 11 if
+something looks structurally wrong rather than just numerically unlucky.
+
+After Stage 12: Phase 2 is complete. **Stage 13 — Flower FedAvg in simulation**
+(`REQ:L`) starts Phase 3 and is the actual FL gate — no `ClientApp`/`ServerApp`/FedAvg
+code exists anywhere yet (verified in the OOD-gate/Streamlit audit earlier this
+session). This is a large stage; consider checking in with the owner before starting
+it rather than assuming the same "complete this phase" latitude extends automatically
+into Phase 3.

@@ -1,0 +1,21 @@
+# Stage 11 — local single-hospital baseline (ablation row 1).
+#
+# Trains an independent classifier per hospital, per partition regime (natural /
+# balanced, per DG-3's "report both" resolution), over >=3 seeds.
+
+hospitals: [A, B, C]
+
+partition_files:
+  natural: data/partitions/hospitals_natural.json
+  balanced: data/partitions/hospitals_natural_balanced.json
+
+seeds: [42, 123, 2024] # >= 3 seeds, per CLAUDE.md section 11.2
+
+training:
+  num_epochs: 30
+  lr: 0.001
+  batch_size: 32
+  patience: 5 # early stopping on val AUROC
+
+mlflow:
+  experiment_name: local_baseline
