@@ -161,8 +161,9 @@ re-asserted by a dedicated test against the live files).
 | 6 — CLAHE preprocessing + cache | **Done.** 37/37 tests passing. Full cache built: 5,856 Kermany + 26,684 RSNA images (46GB on local disk, not committed — see §9). MLflow artifact logged (experiment `clahe_cache`). | `91d7da8` |
 | 7 — torchvision transforms/Dataset/DataLoader | **Done.** 48/48 tests passing. Smoke-tested end-to-end on real cached data from both sources, including multi-worker DataLoader. | `dda0bed` |
 | 8 — DenseNet121 frozen backbone + head | **Done — ADR-1's premise fully validated, no GroupNorm fallback needed.** 57/57 tests passing (9 new). See note below the table. | `80f533d` |
-| 9 — Frozen-backbone feature cache | **Done.** DG-5 resolved (K=5 augmented views). 62/62 tests passing (5 new). Full cache built and measured — see note below the table. | (pending commit this session) |
-| 10–23 | Not started | — |
+| 9 — Frozen-backbone feature cache | **Done.** DG-5 resolved (K=5 augmented views). 62/62 tests passing (5 new). Full cache built and measured — see note below the table. | `dfb1d9f` |
+| 10 — Evaluation and metrics module | **Done.** 85/85 tests passing (23 new). No open decision gates. See note below the table. | (pending commit this session) |
+| 11–23 | Not started | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -209,8 +210,31 @@ on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
   cached eval-style feature is bit-for-bit identical (`atol=1e-5`) to training it via a
   live full-model forward pass, given the same seed and no augmentation.
 
-**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), and Phase 2's Stages 6–9 are
-complete. Stage 10 is next (required, no open decision gates).**
+**Stage 10 (`src/evaluation/{metrics,bootstrap,reporting}.py`):**
+- `compute_metrics()`: AUROC (primary) + AUPRC + sensitivity/specificity/F1/balanced
+  accuracy at threshold + sensitivity-at-target-specificity (swept via the ROC curve,
+  default target 90%) + confusion matrix. **Threshold policy made explicit**: 0.5
+  default on the positive-class probability, overridable — stated per Stage 10's own
+  flagged risk that this must never be left implicit.
+- Degenerate inputs handled without crashing: single-class y_true reports `NaN` for
+  AUROC/AUPRC/sensitivity-at-specificity (mathematically undefined) rather than raising
+  or fabricating a number; all-correct and all-wrong predictions verified against
+  hand-computed expected values.
+- `bootstrap_auroc_ci()`: percentile bootstrap, raises immediately and clearly on
+  single-class input (AUROC undefined) rather than crashing inside sklearn.
+- `aggregate_over_seeds()` / `aggregate_metrics_over_seeds()`: mean/std over seeds,
+  always records `n_seeds` explicitly so a table built from fewer than the recommended
+  3 seeds is visible in the data, never silently presented as final.
+- **Known-input regression test**: the canonical sklearn `roc_auc_score` docstring
+  example (`y_true=[0,0,1,1]`, `y_score=[0.1,0.4,0.35,0.8]` → AUROC=0.75), independent
+  of this project's own code.
+- MLflow logging (`log_metrics_to_mlflow`) smoke-tested end-to-end against the real
+  local tracking DB, not just unit-tested in isolation — confirmed metrics actually
+  land in a queryable run.
+- 23 new tests (85 total), all passing.
+
+**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), and Phase 2's Stages 6–10 are
+complete. Stage 11 is next — the first stage that actually trains anything.**
 
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
@@ -281,19 +305,19 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. `5b52bc0` (OPT-5/OPT-6 documentation) is pushed to `origin/main`;
-Stage 9 (`src/data/feature_cache.py`, `scripts/build_feature_cache.py`,
-`tests/test_feature_cache.py`, the `src/models/densenet_head.py` pool/classifier
-refactor, this file's update) is about to be committed as the next commit on top of
-that. Check `git log --oneline -5` on resume — this file is not re-updated after every
-single commit within a session, only at natural pause points.
+**Branch:** `main`. `dfb1d9f` (Stage 9) is pushed to `origin/main`; Stage 10
+(`src/evaluation/{metrics,bootstrap,reporting}.py`,
+`tests/test_{metrics,bootstrap,reporting}.py`, this file's update) is about to be
+committed as the next commit on top of that. Check `git log --oneline -5` on resume —
+this file is not re-updated after every single commit within a session, only at
+natural pause points.
 
 ```
+dfb1d9f Stage 9: frozen-backbone feature cache — DG-5 resolved (K=5 views)
 5b52bc0 Record OPT-5 (Isolation Forest OOD gate) and OPT-6 (Streamlit demo) as approved-in-concept optional extensions
 80f533d Stage 8: DenseNet121 frozen backbone + head — ADR-1 validated
 dda0bed Stage 7: torchvision transforms, Dataset and DataLoader
 91d7da8 Stage 6: OpenCV CLAHE preprocessing and cache (ADR-6)
-6d667cf Stage 5 complete: DG-3 resolved as "report both"
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -305,24 +329,33 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-Stages 8 and 9 are both complete. ADR-1 is fully validated (Stage 8) and the feature
-cache is built and measured (Stage 9, DG-5 resolved as K=5 views, 8.3x speedup). No
-open decision gates remain in Phase 2.
+Stages 8, 9 and 10 are all complete. ADR-1 validated, feature cache built (8.3x
+speedup), and one trusted metrics module exists that every later stage will report
+through. No open decision gates remain in Phases 0–2.
 
-Next is **Stage 10 — evaluation and metrics module** (`REQ`, no open decision gates):
-`src/evaluation/metrics.py` (AUROC as the primary metric, plus AUPRC, sensitivity at
-fixed specificity, specificity, F1, balanced accuracy, confusion matrix — accuracy
-alone is explicitly not acceptable on this imbalanced data per CLAUDE.md §11.2),
-`src/evaluation/bootstrap.py` (bootstrap 95% CIs on AUROC), `src/evaluation/reporting.py`
-(multi-seed mean/std aggregation, results serialization, MLflow logging).
+Next is **Stage 11 — local single-hospital baseline** (`REQ`, **ablation row 1**) — the
+first stage that actually trains anything and produces a real number, and worth
+approaching carefully:
 
-**Build this before Stage 11 (the first baseline) produces any number** — CLAUDE.md
-explicitly warns that building the metrics module after the first baseline is "the
-classic mistake": results get recomputed and tables silently disagree. Required tests:
-metrics match scikit-learn references on synthetic data; degenerate cases (single-class,
-all-correct, all-wrong) handled without crashing; bootstrap CIs reproducible under seed;
-a known-input regression test. Threshold-dependent metrics (F1, sensitivity) need an
-explicit, fixed threshold policy — decide and document it here, don't leave it implicit.
+**What it needs:** `src/training/trainer.py` (non-federated head-training loop — should
+consume Stage 9's feature cache, not raw images, given the 8.3x speedup that unlocks),
+`scripts/train_local.py`, `conf/experiment/local.yaml`. Explicit class-imbalance
+handling (weighted loss or sampling — CLAUDE.md requires the choice be recorded, not
+left implicit; both Kermany (train: 1,349 Normal / 3,883 Pneumonia) and RSNA's natural
+partition (Normal-heavy) are imbalanced, in *opposite* directions, worth noting).
+Checkpointing. Independent runs for Hospitals A, B, C — and per DG-3's "report both"
+resolution, this likely means running against **both** `hospitals_natural.json` and
+`hospitals_natural_balanced.json`, not just one.
 
-After Stage 10: **Stage 11 — local single-hospital baseline** (ablation row 1) is the
-first stage that actually trains anything and produces a real number.
+**Required tests/validation:** loss decreases over training; AUROC meaningfully above
+0.5 (use Stage 10's `compute_metrics`); **3-seed variance reported** (CLAUDE.md §11.2 —
+single-run numbers aren't credible); overfitting checked against the val split; results
+land in MLflow (Stage 2's `tracked_run`).
+
+**Real risk, flagged in the plan itself, worth taking seriously:** *"Frozen-backbone
+accuracy may disappoint; this stage reveals whether ADR-1's accuracy cost is acceptable
+or whether the GroupNorm fallback conversation is required."* If AUROC comes back weak
+after this stage actually trains something, **that is exactly the kind of "requires
+changing approved architecture" situation that should stop and ask the owner**, not a
+cue to unilaterally start tuning around it or switching to the GroupNorm fallback.
+Report the honest number first.
