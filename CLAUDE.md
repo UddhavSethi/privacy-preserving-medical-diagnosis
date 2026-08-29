@@ -584,11 +584,21 @@ touch them.
    `scripts/download_kermany.py` downloads the full archive, verifies it against Mendeley's
    published SHA-256, and extracts only the `chest_xray/` subtree.
 
+2. **Decision Gate DG-2 — RSNA label harmonization (resolved 2026-08-29).** Option (a)
+   approved: keep RSNA's native `Target` grouping (Normal + "No Lung Opacity / Not Normal"
+   both map to the negative class), for benchmark comparability and to preserve the full
+   20,672-patient negative class rather than shrinking Hospitals B/C by ~44%. The resulting
+   clinical caveat — the model learns "abnormal-but-not-pneumonia" = "normal" — is to be
+   stated as an honest limitation in the paper (§15), not engineered around.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
 1. **Dropout placement** for MC Dropout — head-only vs. after dense blocks (§10).
-3. **Target epsilon values** for the DP sweep, and delta relative to dataset size.
-4. **Client count** and default partition scheme for the headline results.
+2. **Target epsilon values** for the DP sweep, and delta relative to dataset size.
+3. **Client count** and default partition scheme for the headline results.
+4. **DG-3 — hospital-size imbalance (Stage 5).** Kermany (~5,860 images) vs. RSNA
+   (~29,684 images) is a large natural imbalance; whether to balance shard sizes, keep
+   the natural imbalance, or report both is not yet decided.
 
 ---
 
@@ -609,7 +619,12 @@ To be stated honestly in the paper. Concealing these weakens credibility more th
 7. **Hardware ceiling.** 4 GB VRAM constrains input resolution, batch size, model capacity and
    the feasibility of ensemble-based methods; clients run sequentially in simulation.
 8. **Patient-level separation depends on identifier availability** in the chosen dataset
-   (ADR-7). If unavailable, this must be disclosed.
+   (ADR-7). Resolved for both approved sources: RSNA carries a clean `patientId`; Kermany's
+   authoritative Mendeley source (unlike the third-party Kaggle mirror commonly used instead)
+   encodes a groupable accession id in *every* filename, Normal and Pneumonia alike — verified
+   empirically, zero id collisions across classes or the source's own train/test split, across
+   all 5,856 files. Both sources therefore get full patient-level grouping in Stage 4; this
+   limitation does not apply to this project's actual data.
 9. **Empirical privacy leakage is asserted from literature, not demonstrated**, unless the
    optional privacy-attack study (§16.1) is approved.
 

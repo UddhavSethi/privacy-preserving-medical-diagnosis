@@ -433,7 +433,11 @@ New, not currently in CLAUDE.md section 4: `numpy`, `pandas`, `scikit-learn` (me
 
 **1. Goal.** Both datasets on disk, checksum-verified, and never committed.
 
-**2. What we implement.** Download and ingest scripts for Kermany (approximately 1.2 GB, JPEG) and RSNA Stage 2 (approximately 12 GB, DICOM); a SHA-256 manifest; a validation report covering counts, class balance, corrupt files, image size distribution and DICOM tag sanity.
+**2. What we implement.** Download and ingest scripts for Kermany (measured: 8.4 GB from the
+authoritative Mendeley source, which bundles an unrelated OCT dataset — not the ~1.2 GB
+originally estimated from a third-party Kaggle mirror) and RSNA Stage 2 (measured: 3.96 GB,
+not the ~12 GB originally estimated); a SHA-256 manifest; a validation report covering
+counts, class balance, corrupt files, image size distribution and DICOM tag sanity.
 
 **3. Files created.** `scripts/download_kermany.py`, `scripts/download_rsna.py`, `scripts/validate_datasets.py`, `data/manifests/*.json`.
 
@@ -450,11 +454,18 @@ New, not currently in CLAUDE.md section 4: `numpy`, `pandas`, `scikit-learn` (me
 **9. Architecture change?** Yes. CLAUDE.md section 14, pending decision 1, becomes resolved. Proposed separately.
 
 ## Stage 4 — Label harmonization and patient-level splitting
-**Class:** REQ  **Size:** M  **DECISION GATE DG-2**
+**Class:** REQ  **Size:** M  **DECISION GATE DG-2 — resolved 2026-08-29, option (a)**
 
 **1. Goal.** One consistent binary label across two differently annotated sources, with ADR-7 honoured.
 
-**2. What we implement.** Label mapping (RSNA Target equal to 1 maps to Pneumonia; the treatment of the negative class is DG-2); patient identifier extraction — RSNA carries a clean `patientId`, whereas Kermany is only partially groupable because pneumonia filenames carry a person identifier and normal filenames do not; grouped train, validation and test splitting; committed split manifests.
+**2. What we implement.** Label mapping — RSNA `Target`==1 maps to Pneumonia, `Target`==0
+(both "Normal" and "No Lung Opacity / Not Normal") maps to Normal, per DG-2's resolution;
+patient identifier extraction — RSNA carries a clean `patientId`; Kermany's authoritative
+Mendeley source (not the third-party Kaggle mirror this estimate was originally written
+against) encodes a groupable accession id in every filename for *both* classes, verified
+empirically with zero cross-class or cross-split id collisions across all 5,856 files, so
+full patient-level grouping is available for both sources; grouped train, validation and
+test splitting; committed split manifests.
 
 **3. Files created.** `src/data/labels.py`, `src/data/splitting.py`, `scripts/build_splits.py`, `data/partitions/*.json`.
 
@@ -462,13 +473,13 @@ New, not currently in CLAUDE.md section 4: `numpy`, `pandas`, `scikit-learn` (me
 
 **5. Prerequisites.** Stage 3.
 
-**6. Testing and validation.** A test asserting zero patient overlap across splits. Splits deterministic given a seed. Class balance reported per split. A test recording Kermany's normal-class grouping limitation explicitly rather than ignoring it silently.
+**6. Testing and validation.** A test asserting zero patient overlap across splits. Splits deterministic given a seed. Class balance reported per split.
 
 **7. Expected output.** Frozen, committed, reproducible splits.
 
-**8. Risks.** DG-2 is substantive. Including RSNA's "No Lung Opacity / Not Normal" cases as Normal teaches the model that abnormal-but-not-pneumonia equals normal, which is clinically wrong but matches the RSNA challenge framing. Excluding them shrinks and cleans the negative class. This choice materially changes results and must be justified in the paper. Separately, Kermany's normal-class patient leakage is unavoidable and must be disclosed.
+**8. Risks.** DG-2 is resolved: including RSNA's "No Lung Opacity / Not Normal" cases as Normal teaches the model that abnormal-but-not-pneumonia equals normal, which is clinically questionable but matches the published RSNA challenge framing and preserves the full negative class — this must be stated as an honest limitation in the paper (CLAUDE.md section 15), not engineered around.
 
-**9. Architecture change?** Adds a documented limitation to CLAUDE.md section 15.
+**9. Architecture change?** No — CLAUDE.md section 14 already records DG-2's resolution and section 15's patient-identifier limitation has been corrected to reflect that both sources are fully groupable.
 
 ## Stage 5 — Hospital partitioning
 **Class:** REQ  **Size:** S  **DECISION GATE DG-3**
@@ -1071,13 +1082,11 @@ The stages group into review batches, each ending at a natural approval point.
 
 ---
 
-# Pending CLAUDE.md updates
-
-Under CLAUDE.md section 17.1, two changes are already warranted and await approval. Neither has been applied.
-
-1. **Section 14, pending decision 1** — the dataset strategy is now resolved to Kermany as Hospital A and RSNA as Hospitals B and C. This would move from pending and blocking to a recorded decision, with the Kermany normal-class patient-grouping limitation added to section 15.
-2. **Section 4** — the dependency table requires roughly eight additions: `numpy`, `pandas`, `scikit-learn`, `pydicom`, `pillow`, `tqdm`, `matplotlib`, `grad-cam` or `captum`, and optionally `kaggle`. This is best proposed together with DG-1 at Stage 1, so that pins and the documentation edit are approved in a single pass.
-
 ---
 
-*End of plan. No implementation has begun; no dependency has been installed; no dataset has been downloaded; nothing has been committed or pushed.*
+*This document describes the target plan as originally approved. It is not kept in lockstep
+with implementation progress — for current status, completed stages, resolved decision
+gates, and exact next steps, see `docs/SESSION_STATE.md`, which is the authoritative
+up-to-date snapshot. Both of the CLAUDE.md updates originally flagged as pending here (the
+dataset-decision write-back and the ~8-row dependency-table addition) were proposed and
+applied during Stages 1 and 3.*
