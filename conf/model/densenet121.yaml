@@ -1,0 +1,12 @@
+# DenseNet121 frozen backbone + trainable head (ADR-1, Stage 8).
+
+architecture: densenet121
+pretrained: true
+num_classes: 2
+freeze_backbone: true # ADR-1 — the load-bearing decision; never set false without approval
+
+head:
+  hidden_dim: 256
+  dropout_rate: 0.3
+  # Head-only dropout placement (CLAUDE.md section 14, resolved in Stage 8) — see
+  # src/models/densenet_head.py module docstring for the tradeoff/rationale.

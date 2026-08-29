@@ -567,9 +567,9 @@ touch them.
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | Not created |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0 (Stages 0–2) complete; Phase 1 (Stages 3–5: acquisition, labeling, partitioning) complete |
+| Code | Phase 0 (Stages 0–2), Phase 1 (Stages 3–5), and Phase 2 Stages 6–8 (preprocessing, transforms/Dataset, frozen-backbone model — ADR-1 validated) complete |
 | Docker configuration | None |
-| Tests | 29 passing |
+| Tests | 57 passing |
 
 ### Resolved decisions
 
@@ -598,11 +598,17 @@ touch them.
    frozen in `data/partitions/hospitals_natural{,_balanced}.json`; both should appear in the
    ablation results.
 
+4. **Dropout placement (resolved in Stage 8, 2026-08-29).** Head-only: a single
+   `Dropout(p=0.3)` inside the trainable head, between its hidden `Linear(1024,256)+ReLU`
+   and the final `Linear(256,2)`. Chosen for simplicity and to keep the backbone/head
+   separation ADR-1 depends on completely clean. Accepted tradeoff: MC Dropout (§10, Stage
+   19) will only capture last-layer uncertainty, not backbone-level uncertainty. See
+   `src/models/densenet_head.py`.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
-1. **Dropout placement** for MC Dropout — head-only vs. after dense blocks (§10).
-2. **Target epsilon values** for the DP sweep, and delta relative to dataset size.
-3. **Client count** and default partition scheme for the headline results — partially
+1. **Target epsilon values** for the DP sweep, and delta relative to dataset size.
+2. **Client count** and default partition scheme for the headline results — partially
    resolved by DG-3 (client count of 3 for the natural regime); still open for the
    Dirichlet synthetic sweep's client count and which regime is the paper's primary
    headline vs. secondary comparison.
