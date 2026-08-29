@@ -1,0 +1,20 @@
+# torchvision transform pipeline settings (Stage 7).
+
+image_size: 224
+
+normalization:
+  # ImageNet statistics — required because the model (Stage 8) is an ImageNet-pretrained
+  # DenseNet121 (ADR-1).
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+
+train_augmentation:
+  # Mild only; no horizontal flip (chest X-ray laterality is clinically meaningful).
+  random_rotation_degrees: 10.0
+  color_jitter:
+    brightness: 0.1
+    contrast: 0.1
+
+dataloader:
+  batch_size: 32
+  num_workers: 4

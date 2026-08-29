@@ -156,12 +156,13 @@ re-asserted by a dedicated test against the live files).
 | 3 — Dataset acquisition & validation | **Done**, both datasets, zero data-integrity issues | `3aea1f0` (Kermany), `74c6ea5` (RSNA) |
 | 4 — Label harmonization & patient-level splitting | **Done** — DG-2 applied, both sources fully patient-grouped, 18 tests passing, splits frozen in `data/partitions/{kermany,rsna}_splits.json` | `28131be` |
 | 5 — Hospital partitioning | **Done.** DG-3 resolved (report both). 29/29 tests passing. | `6d667cf` |
-| 6 — CLAHE preprocessing + cache | **Done.** 37/37 tests passing. Full cache built: 5,856 Kermany + 26,684 RSNA images (46GB on local disk, not committed — see §9). MLflow artifact logged (experiment `clahe_cache`). | (pending commit this session) |
-| 7 — torchvision transforms/Dataset/DataLoader | Not started | — |
+| 6 — CLAHE preprocessing + cache | **Done.** 37/37 tests passing. Full cache built: 5,856 Kermany + 26,684 RSNA images (46GB on local disk, not committed — see §9). MLflow artifact logged (experiment `clahe_cache`). | `91d7da8` |
+| 7 — torchvision transforms/Dataset/DataLoader | **Done.** 48/48 tests passing. Smoke-tested end-to-end on real cached data from both sources, including multi-worker DataLoader. | (pending commit this session) |
 | 8–23 | Not started | — |
 
-**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), and Phase 2's Stage 6 are
-complete. Stage 7 is next, no open decision gates block it.**
+**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), and Phase 2's Stages 6–7 are
+complete. Stage 8 is next — see §11, this is the single largest technical-risk stage
+in the whole project.**
 
 ## 8. Pending decisions / open decision gates
 
@@ -217,19 +218,19 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. `6d667cf` (Stage 5, DG-3 resolved) is pushed to `origin/main`;
-Stage 6 (`src/data/preprocessing.py`, `scripts/build_clahe_cache.py`,
-`tests/test_preprocessing.py`, this file's update) is about to be committed as the next
-commit on top of that. Check `git log --oneline -5` on resume — this file is not
-re-updated after every single commit within a session, only at natural pause points.
+**Branch:** `main`. `91d7da8` (Stage 6) is pushed to `origin/main`; Stage 7
+(`src/data/transforms.py`, `src/data/datasets.py`, `conf/data/transforms.yaml`,
+`tests/test_transforms.py`, `tests/test_datasets.py`, this file's update) is about to
+be committed as the next commit on top of that. Check `git log --oneline -5` on
+resume — this file is not re-updated after every single commit within a session, only
+at natural pause points.
 
 ```
+91d7da8 Stage 6: OpenCV CLAHE preprocessing and cache (ADR-6)
 6d667cf Stage 5 complete: DG-3 resolved as "report both"
 3ae7e78 Stage 5: hospital partitioning code + natural/Dirichlet outputs (DG-3 open)
 28131be Stage 4: label harmonization and patient-grouped splitting (DG-2 applied)
 74c6ea5 Stage 3 complete: RSNA acquired, checksummed, validated (DICOM)
-3aea1f0 Stage 3 (partial): Kermany acquisition, checksummed and validated
-4ab5922 Stage 1: pinned Python 3.11 environment (ADR-5)
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -241,13 +242,37 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-Phase 1 and Stage 6 are complete. Next is **Stage 7 — torchvision transforms, Dataset
-and DataLoader**: `src/data/transforms.py` (train/eval transform pipelines — resize to
-224, ImageNet normalization, seeded augmentation), `src/data/datasets.py` (a Dataset
-reading from `data/clahe_cache/` rather than raw images — the cache built in Stage 6 is
-the read path from here on), `conf/data/transforms.yaml`. Use
-`src/utils/seeding.py::seed_worker` / `make_generator` (Stage 2) for the DataLoader, not
-ad-hoc seeding. Required tests: batch shapes/dtypes/value ranges correct; normalization
-statistics verified; augmentation reproducible under a fixed seed; no leakage of
-training-time augmentation into evaluation transforms. No open decision gates block
-this stage.
+Phase 1 and Stages 6–7 are complete (`src/data/transforms.py` — separate
+`build_train_transform`/`build_eval_transform`, no horizontal flip since chest X-ray
+laterality is clinically meaningful; `src/data/datasets.py` — `ChestXrayDataset` +
+`build_dataloader` reading from `data/clahe_cache/`; smoke-tested end-to-end on real
+data from both sources including multi-worker loading).
+
+Next is **Stage 8 — DenseNet121 frozen backbone + trainable head**, marked in the plan
+as **the single largest technical risk in the project** and a **CRITICAL GATE (DG-4,
+DG-6)**. This is where ADR-1 (freeze the backbone, train only a small head) either
+gets proven out or fails and triggers the GroupNorm fallback — do this validation now,
+not later, because failure here is cheap and failure discovered downstream (e.g. at
+Stage 14's DP integration) is not.
+
+What it needs: `src/models/densenet_head.py`, `src/models/freezing.py`,
+`conf/model/densenet121.yaml`. Build an ImageNet-pretrained DenseNet121 with the
+backbone frozen (BatchNorm forced to `eval()`, running stats frozen) and a small
+trainable classifier head with deliberately inserted dropout (this also resolves
+CLAUDE.md §14's still-open "dropout placement" pending decision — head-only vs. after
+dense blocks — so that choice needs to be made and documented as part of this stage,
+not silently defaulted).
+
+**The stage's entire point is its acceptance tests, not just building the model:**
+1. `opacus.validators.ModuleValidator` accepts the frozen-backbone model (already
+   confirmed importable in Stage 1; this is the real test — does it pass validation).
+2. Per-sample gradients compute correctly, and only for head parameters.
+3. BatchNorm running statistics are provably unchanged after a training step.
+4. A spike test: one DP-SGD step fits within the 4GB VRAM budget (RTX 3050) at the
+   intended batch size.
+5. Trainable parameter count lands in the expected ~1e5–1e6 range (not ~7M).
+
+**If any of this fails**, the ADR-1 fallback (Opacus `ModuleValidator.fix()` to
+GroupNorm, fine-tune more layers) requires explicit owner approval before adopting —
+do not silently switch to it. This is exactly the kind of "requires changing approved
+architecture" situation that should stop and ask, not proceed autonomously.
