@@ -1,0 +1,73 @@
+# ---- Secrets / security material (CLAUDE.md §13, §17.4) ----
+certs/
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+.env
+.env.*
+secrets/
+
+# ---- Patient data / datasets (never commit the images themselves) ----
+data/*
+datasets/
+*.dcm
+*.dicom
+# ...but DO track reproducible split manifests and checksums (CLAUDE.md 12)
+!data/partitions/
+data/partitions/*
+!data/partitions/*.json
+!data/partitions/.gitkeep
+!data/manifests/
+data/manifests/*
+!data/manifests/*.json
+!data/manifests/.gitkeep
+
+# ---- Experiment outputs ----
+mlruns/
+mlartifacts/
+mlruns.db
+mlflow.db
+outputs/
+multirun/
+.hydra/
+runs/
+checkpoints/
+*.pth
+*.pt
+*.ckpt
+*.onnx
+cache/
+.cache/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.python-version
+
+# ---- Testing / tooling ----
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
