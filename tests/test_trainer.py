@@ -1,8 +1,14 @@
+import json
+
 import torch
 
+from src.data.feature_cache import FeatureCacheKey, cache_file_path, save_feature_bank
 from src.training.trainer import (
+    FEATURE_KEY,
     compute_class_weights,
     evaluate_classifier,
+    load_hospital_features,
+    load_pooled_features,
     train_classifier,
 )
 
@@ -119,3 +125,85 @@ def test_reproducible_given_seed():
     )
     for k in result_a["classifier_state"]:
         assert torch.equal(result_a["classifier_state"][k], result_b["classifier_state"][k])
+
+
+def _build_synthetic_hospital_fixture(tmp_path, source: str, hospital_patient_ids: dict):
+    """Builds a synthetic partition file + matching feature-cache banks, mirroring the
+    real on-disk structure, for hermetically testing load_hospital_features /
+    load_pooled_features without depending on the real 62GB dataset.
+
+    `hospital_patient_ids`: {hospital_name: {"train": [...], "val": [...], "test": [...]}}
+    """
+    feature_cache_dir = tmp_path / "feature_cache"
+    partition = {"hospitals": {}}
+
+    # collect all patient_ids per split across hospitals, to build one shared bank per split
+    by_split_all: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    for hospital, splits in hospital_patient_ids.items():
+        partition["hospitals"][hospital] = []
+        for split, pids in splits.items():
+            for pid in pids:
+                by_split_all[split].append(pid)
+                partition["hospitals"][hospital].append(
+                    {"source": source, "patient_id": pid, "label": "Normal", "frozen_split": split}
+                )
+
+    for split, pids in by_split_all.items():
+        # Always write a bank per split, even an empty one — a real source's feature
+        # cache always has train/val/test banks regardless of any one hospital's split.
+        num_views = FEATURE_KEY.num_augmented_views + 1 if split == "train" else 1
+        features = torch.randn(len(pids), num_views, 1024)
+        labels = [0] * len(pids)
+        bank_path = cache_file_path(feature_cache_dir, source, split, FEATURE_KEY)
+        save_feature_bank(bank_path, features, pids, labels)
+
+    partition_path = tmp_path / "partition.json"
+    partition_path.write_text(json.dumps(partition))
+    return partition_path, feature_cache_dir
+
+
+def test_load_hospital_features_shapes(tmp_path):
+    partition_path, feature_cache_dir = _build_synthetic_hospital_fixture(
+        tmp_path,
+        source="kermany",
+        hospital_patient_ids={
+            "A": {"train": ["p1", "p2", "p3"], "val": ["p4"], "test": ["p5", "p6"]},
+        },
+    )
+    hf = load_hospital_features(partition_path, "A", feature_cache_dir=feature_cache_dir)
+    assert hf.train_features.shape == (3, FEATURE_KEY.num_augmented_views + 1, 1024)
+    assert hf.val_features.shape == (1, 1024)  # eval view only, flattened
+    assert hf.test_features.shape == (2, 1024)
+    assert len(hf.train_labels) == 3
+
+
+def test_load_hospital_features_filters_by_hospital_patient_ids(tmp_path):
+    """Hospital B/C are shards of a source — load_hospital_features must only pull the
+    patient_ids belonging to that hospital, not the whole source's feature bank."""
+    partition_path, feature_cache_dir = _build_synthetic_hospital_fixture(
+        tmp_path,
+        source="rsna",
+        hospital_patient_ids={
+            "B": {"train": ["p1", "p2"], "val": [], "test": []},
+            "C": {"train": ["p3", "p4", "p5"], "val": [], "test": []},
+        },
+    )
+    hf_b = load_hospital_features(partition_path, "B", feature_cache_dir=feature_cache_dir)
+    hf_c = load_hospital_features(partition_path, "C", feature_cache_dir=feature_cache_dir)
+    assert hf_b.train_features.shape[0] == 2
+    assert hf_c.train_features.shape[0] == 3
+
+
+def test_load_pooled_features_concatenates_hospitals(tmp_path):
+    partition_path, feature_cache_dir = _build_synthetic_hospital_fixture(
+        tmp_path,
+        source="rsna",
+        hospital_patient_ids={
+            "B": {"train": ["p1", "p2"], "val": ["p3"], "test": ["p4"]},
+            "C": {"train": ["p5", "p6", "p7"], "val": ["p8"], "test": ["p9"]},
+        },
+    )
+    pooled = load_pooled_features(partition_path, ["B", "C"], feature_cache_dir=feature_cache_dir)
+    assert pooled.train_features.shape[0] == 5  # 2 + 3
+    assert pooled.val_features.shape[0] == 2  # 1 + 1
+    assert pooled.test_features.shape[0] == 2  # 1 + 1

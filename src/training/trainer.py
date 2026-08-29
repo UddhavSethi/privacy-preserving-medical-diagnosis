@@ -87,6 +87,30 @@ def load_hospital_features(
     )
 
 
+def load_pooled_features(
+    partition_path: Path,
+    hospitals: list[str],
+    feature_cache_dir: Path = FEATURE_CACHE_DIR,
+) -> HospitalFeatures:
+    """Pool multiple hospitals' cached features together (Stage 12: centralized
+    baseline) — concatenates train/val/test across all given hospitals. Same view
+    dimension (K augmented + 1 eval) for every hospital, so concatenation on the
+    sample dimension is safe."""
+    per_hospital = [load_hospital_features(partition_path, h, feature_cache_dir) for h in hospitals]
+
+    def _cat(attr: str) -> torch.Tensor:
+        return torch.cat([getattr(hf, attr) for hf in per_hospital], dim=0)
+
+    return HospitalFeatures(
+        train_features=_cat("train_features"),
+        train_labels=_cat("train_labels"),
+        val_features=_cat("val_features"),
+        val_labels=_cat("val_labels"),
+        test_features=_cat("test_features"),
+        test_labels=_cat("test_labels"),
+    )
+
+
 def compute_class_weights(labels: torch.Tensor, num_classes: int = 2) -> torch.Tensor:
     """Inverse-frequency class weights for CrossEntropyLoss."""
     counts = torch.bincount(labels, minlength=num_classes).float()
