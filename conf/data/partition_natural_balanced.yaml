@@ -1,0 +1,23 @@
+# Size-balanced companion to partition_natural.yaml (DG-3 resolution: report both).
+#
+# Same A/B/C hospital assignment as partition_natural.yaml, but Hospitals B and C
+# (RSNA shards) are label-stratified-subsampled down to Hospital A's (Kermany's) size
+# rather than left at their full natural size — isolates the effect of client-size
+# imbalance on FedAvg from everything else. Hospital A is never upsampled.
+
+scheme: natural_balanced
+
+hospitals:
+  A:
+    source: kermany
+  B:
+    source: rsna
+    shard: B
+    subsampled_to: A_size
+  C:
+    source: rsna
+    shard: C
+    subsampled_to: A_size
+
+rsna_shard_seed: 1000 # same as partition_natural.yaml, so B/C membership matches before subsampling
+balance_seed: 1500 # independent seed for which patients survive the subsample

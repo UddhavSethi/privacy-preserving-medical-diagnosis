@@ -5,6 +5,7 @@ from src.data.partitioning import (
     dirichlet_partition,
     natural_shard_rsna,
     per_client_stats,
+    subsample_to_size,
 )
 
 
@@ -87,3 +88,46 @@ def test_dirichlet_alpha_sweep_changes_skew():
     low_alpha_variance = pneumonia_fraction_variance(0.05)
     high_alpha_variance = pneumonia_fraction_variance(100.0)
     assert low_alpha_variance > high_alpha_variance
+
+
+def test_subsample_hits_target_size_and_preserves_patient_grouping():
+    records = _make_records(num_normal_patients=200, num_pneumonia_patients=100, images_per_patient=2)
+    total_images = len(records)
+    target = total_images // 3
+
+    subset = subsample_to_size(records, target_num_images=target, seed=1500)
+
+    # Within a reasonable margin of the target (patient-level granularity, not exact).
+    assert target * 0.85 <= len(subset) <= target * 1.15
+    # No patient contributes only some of their images.
+    by_patient_full = {}
+    for r in records:
+        by_patient_full.setdefault(r["patient_id"], []).append(r)
+    by_patient_subset = {}
+    for r in subset:
+        by_patient_subset.setdefault(r["patient_id"], []).append(r)
+    for pid, recs in by_patient_subset.items():
+        assert len(recs) == len(by_patient_full[pid])
+
+
+def test_subsample_preserves_class_ratio():
+    records = _make_records(num_normal_patients=300, num_pneumonia_patients=100, images_per_patient=1)
+    subset = subsample_to_size(records, target_num_images=100, seed=1500)
+    normal = sum(1 for r in subset if r["label"] == "Normal")
+    pneumonia = sum(1 for r in subset if r["label"] == "Pneumonia")
+    assert pneumonia > 0
+    ratio = normal / pneumonia
+    assert 2.0 < ratio < 4.0  # overall ratio is 3:1
+
+
+def test_subsample_never_upsamples():
+    records = _make_records(num_normal_patients=10, num_pneumonia_patients=5)
+    subset = subsample_to_size(records, target_num_images=10_000, seed=1500)
+    assert len(subset) == len(records)
+
+
+def test_subsample_deterministic_given_seed():
+    records = _make_records(num_normal_patients=200, num_pneumonia_patients=100)
+    a = subsample_to_size(records, target_num_images=100, seed=1500)
+    b = subsample_to_size(records, target_num_images=100, seed=1500)
+    assert sorted(r["patient_id"] for r in a) == sorted(r["patient_id"] for r in b)

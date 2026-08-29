@@ -1,10 +1,14 @@
 """Build and freeze hospital partitions (Stage 5).
 
-Writes data/partitions/hospitals_natural.json (Kermany=A, RSNA patient-disjoint shards
-B/C, full natural imbalance — DG-3's "keep the natural imbalance" half; whether to also
-produce a size-balanced variant is still open, see CLAUDE.md section 14) and
-data/partitions/hospitals_dirichlet_alpha_sweep.json (a demonstration sweep over several
-alpha values, pooling both sources).
+Writes three files, per Decision Gate DG-3's "report both" resolution (owner-approved
+2026-08-29):
+  - data/partitions/hospitals_natural.json — Kermany=A, RSNA patient-disjoint shards
+    B/C, full natural ~4.5x imbalance. The headline, realistic regime.
+  - data/partitions/hospitals_natural_balanced.json — same A/B/C assignment, but B and
+    C are subsampled down to Hospital A's size (no upsampling of A). A companion result
+    isolating the effect of client-size imbalance from everything else.
+  - data/partitions/hospitals_dirichlet_alpha_sweep.json — a demonstration sweep over
+    several alpha values, pooling both sources, independent of DG-3.
 
 Usage: uv run python scripts/build_partitions.py
 """
@@ -18,12 +22,14 @@ from src.data.partitioning import (
     dirichlet_partition,
     natural_shard_rsna,
     per_client_stats,
+    subsample_to_size,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PARTITIONS_DIR = REPO_ROOT / "data" / "partitions"
 
 RSNA_SHARD_SEED = 1000
+BALANCE_SEED = 1500
 DIRICHLET_SEED = 2000
 DIRICHLET_NUM_CLIENTS = 5
 DIRICHLET_ALPHAS = [0.1, 0.5, 1.0, 10.0]
@@ -38,7 +44,7 @@ def _load_source_records(source: str) -> list[dict]:
     return records
 
 
-def build_natural() -> None:
+def build_natural() -> dict[str, list[dict]]:
     kermany_records = _load_source_records("kermany")
     rsna_records = _load_source_records("rsna")
 
@@ -50,9 +56,8 @@ def build_natural() -> None:
         "scheme": "natural",
         "note": (
             "Full natural imbalance — Hospital A (Kermany) is far smaller than B/C "
-            "(RSNA shards). This is DG-3's 'keep the natural imbalance' option; a "
-            "size-balanced variant is a separate, not-yet-built config pending owner "
-            "input (CLAUDE.md section 14)."
+            "(RSNA shards). DG-3 resolution: report both this and the size-balanced "
+            "variant (hospitals_natural_balanced.json) — this is the unbalanced half."
         ),
         "rsna_shard_seed": RSNA_SHARD_SEED,
         "summary": per_client_stats(hospitals),
@@ -61,6 +66,36 @@ def build_natural() -> None:
     out_path = PARTITIONS_DIR / "hospitals_natural.json"
     out_path.write_text(json.dumps(out, indent=2))
     print("natural:", json.dumps(out["summary"], indent=2))
+    print(f"written: {out_path}\n")
+    return hospitals
+
+
+def build_natural_balanced(natural_hospitals: dict[str, list[dict]]) -> None:
+    target_size = len(natural_hospitals["A"])  # Hospital A (Kermany) is the smallest
+    hospitals = {
+        "A": natural_hospitals["A"],
+        "B": subsample_to_size(natural_hospitals["B"], target_size, seed=BALANCE_SEED),
+        "C": subsample_to_size(natural_hospitals["C"], target_size, seed=BALANCE_SEED),
+    }
+    assert_no_patient_overlap_across_hospitals(hospitals)
+
+    out = {
+        "scheme": "natural_balanced",
+        "note": (
+            "DG-3 resolution: report both. Same A/B/C assignment as hospitals_natural.json, "
+            "but Hospitals B and C are label-stratified-subsampled down to Hospital A's "
+            "size (never upsampled) so all three hospitals contribute comparable amounts "
+            "of data — isolates the effect of client-size imbalance from other factors."
+        ),
+        "rsna_shard_seed": RSNA_SHARD_SEED,
+        "balance_seed": BALANCE_SEED,
+        "target_size": target_size,
+        "summary": per_client_stats(hospitals),
+        "hospitals": hospitals,
+    }
+    out_path = PARTITIONS_DIR / "hospitals_natural_balanced.json"
+    out_path.write_text(json.dumps(out, indent=2))
+    print("natural_balanced:", json.dumps(out["summary"], indent=2))
     print(f"written: {out_path}\n")
 
 
@@ -90,7 +125,8 @@ def build_dirichlet_sweep() -> None:
 
 
 def main() -> None:
-    build_natural()
+    natural_hospitals = build_natural()
+    build_natural_balanced(natural_hospitals)
     build_dirichlet_sweep()
 
 

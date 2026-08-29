@@ -567,17 +567,17 @@ touch them.
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | Not created |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0 (Stages 0–2) complete; Stage 3 (dataset acquisition) in progress |
+| Code | Phase 0 (Stages 0–2) complete; Phase 1 (Stages 3–5: acquisition, labeling, partitioning) complete |
 | Docker configuration | None |
-| Tests | 8 passing (Stage 2 reproducibility spine) |
+| Tests | 29 passing |
 
 ### Resolved decisions
 
 1. **Dataset strategy (resolved 2026-08-29).** Two-source strategy approved: Kermany chest
    X-ray dataset as Hospital A, RSNA Pneumonia Detection Challenge shards as Hospitals B and
    C. See `docs/IMPLEMENTATION_PLAN.md` Part IV preface for the label-semantics and
-   Kaggle-access consequences that follow from this choice (Decision Gate DG-2 remains open).
-   **Correction to the acquisition plan:** the Kermany dataset's authoritative source
+   Kaggle-access consequences that follow from this choice (Decision Gate DG-2, resolved
+   below). **Correction to the acquisition plan:** the Kermany dataset's authoritative source
    (Mendeley Data, doi:10.17632/rscbjbr9sj.3) no longer offers a standalone chest-X-ray-only
    download — as of dataset version 3 it is bundled with an unrelated OCT dataset in one
    ~8.4GB zip (not the ~1.2GB originally estimated from the common Kaggle mirror).
@@ -591,14 +591,21 @@ touch them.
    clinical caveat — the model learns "abnormal-but-not-pneumonia" = "normal" — is to be
    stated as an honest limitation in the paper (§15), not engineered around.
 
+3. **Decision Gate DG-3 — hospital-size imbalance (resolved 2026-08-29).** Owner chose to
+   report both regimes: the natural partition (Hospital A/Kermany 5,856 images vs. Hospitals
+   B/C/RSNA shards 13,342 images each — roughly 4.5x) and a size-balanced companion (B and C
+   label-stratified-subsampled down to Hospital A's size, never upsampling A). Both are
+   frozen in `data/partitions/hospitals_natural{,_balanced}.json`; both should appear in the
+   ablation results.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
 1. **Dropout placement** for MC Dropout — head-only vs. after dense blocks (§10).
 2. **Target epsilon values** for the DP sweep, and delta relative to dataset size.
-3. **Client count** and default partition scheme for the headline results.
-4. **DG-3 — hospital-size imbalance (Stage 5).** Kermany (~5,860 images) vs. RSNA
-   (~29,684 images) is a large natural imbalance; whether to balance shard sizes, keep
-   the natural imbalance, or report both is not yet decided.
+3. **Client count** and default partition scheme for the headline results — partially
+   resolved by DG-3 (client count of 3 for the natural regime); still open for the
+   Dirichlet synthetic sweep's client count and which regime is the paper's primary
+   headline vs. secondary comparison.
 
 ---
 
