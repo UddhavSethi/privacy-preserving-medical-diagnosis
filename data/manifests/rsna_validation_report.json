@@ -1,5 +1,40 @@
 {
   "dataset": "rsna",
-  "status": "skipped",
-  "reason": "no manifest found (RSNA not yet downloaded)"
+  "status": "ok",
+  "num_files_manifested": 29684,
+  "checksum_mismatches": [],
+  "corrupt_files": [],
+  "image_size": {
+    "rows": {
+      "min": 1024,
+      "max": 1024,
+      "mean": 1024
+    },
+    "columns": {
+      "min": 1024,
+      "max": 1024,
+      "mean": 1024
+    }
+  },
+  "photometric_interpretation_counts": {
+    "MONOCHROME2": 29684
+  },
+  "rescale_slope_intercept": {
+    "present": 0,
+    "absent": 29684,
+    "note": "Absent means the DICOM stores raw pixel values with no linear rescale to apply; present means RescaleSlope/RescaleIntercept must be applied before display or CLAHE (ADR-6) \u2014 verify which case applies before Stage 6 preprocessing, per CLAUDE.md's flagged DICOM pixel-handling risk."
+  },
+  "label_balance": {
+    "unique_patients": 26684,
+    "target_counts": {
+      "0": 20672,
+      "1": 6012
+    },
+    "detailed_class_counts": {
+      "No Lung Opacity / Not Normal": 11821,
+      "Normal": 8851,
+      "Lung Opacity": 6012
+    },
+    "dg2_note": "Target=0 (20,672 rows) combines two semantically different classes: 'Normal' (8,851) and 'No Lung Opacity / Not Normal' (11,821, i.e. abnormal but not pneumonia). Decision Gate DG-2 (docs/IMPLEMENTATION_PLAN.md Stage 4) asks whether to keep this RSNA-native grouping (matches the original challenge, but teaches the model 'abnormal-but-not-pneumonia' = 'normal', which is clinically questionable) or exclude 'No Lung Opacity / Not Normal' from the negative class (cleaner label semantics, smaller/costlier negative class, diverges from the published challenge framing). Unresolved \u2014 do not act on it without the project owner's decision."
+  }
 }
