@@ -33,10 +33,13 @@ CHUNK_SIZE = 1024 * 1024
 
 
 def check_kaggle_credentials() -> None:
-    kaggle_json = Path.home() / ".kaggle" / "kaggle.json"
-    if not kaggle_json.exists():
+    # The Kaggle CLI accepts either the legacy ~/.kaggle/kaggle.json API key or the
+    # newer ~/.kaggle/access_token OAuth token — check both rather than assuming one.
+    kaggle_dir = Path.home() / ".kaggle"
+    has_credentials = (kaggle_dir / "kaggle.json").exists() or (kaggle_dir / "access_token").exists()
+    if not has_credentials:
         raise SystemExit(
-            "No Kaggle API token found at ~/.kaggle/kaggle.json.\n"
+            "No Kaggle credentials found in ~/.kaggle/ (expected kaggle.json or access_token).\n"
             "This is a manual, owner-only step — see the module docstring in this file "
             "for setup instructions. Not attempting to proceed without it."
         )

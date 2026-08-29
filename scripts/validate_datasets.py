@@ -15,12 +15,15 @@ Usage: uv run python scripts/validate_datasets.py [--dataset kermany|rsna|all]
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import statistics
 import sys
+from collections import Counter
 from pathlib import Path
 
+import pydicom
 from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -97,13 +100,97 @@ def validate_kermany() -> dict:
     return report
 
 
+def _label_balance(raw_root: Path) -> dict | None:
+    labels_csv = raw_root / "stage_2_train_labels.csv"
+    class_csv = raw_root / "stage_2_detailed_class_info.csv"
+    if not labels_csv.exists() or not class_csv.exists():
+        return None
+
+    with open(labels_csv, newline="") as f:
+        target_by_patient = {row["patientId"]: row["Target"] for row in csv.DictReader(f)}
+    with open(class_csv, newline="") as f:
+        class_by_patient = {row["patientId"]: row["class"] for row in csv.DictReader(f)}
+
+    return {
+        "unique_patients": len(target_by_patient),
+        "target_counts": dict(Counter(target_by_patient.values())),
+        "detailed_class_counts": dict(Counter(class_by_patient.values())),
+        "dg2_note": (
+            "Target=0 (20,672 rows) combines two semantically different classes: "
+            "'Normal' (8,851) and 'No Lung Opacity / Not Normal' (11,821, i.e. abnormal "
+            "but not pneumonia). Decision Gate DG-2 (docs/IMPLEMENTATION_PLAN.md Stage 4) "
+            "asks whether to keep this RSNA-native grouping (matches the original "
+            "challenge, but teaches the model 'abnormal-but-not-pneumonia' = 'normal', "
+            "which is clinically questionable) or exclude 'No Lung Opacity / Not Normal' "
+            "from the negative class (cleaner label semantics, smaller/costlier negative "
+            "class, diverges from the published challenge framing). Unresolved — do not "
+            "act on it without the project owner's decision."
+        ),
+    }
+
+
 def validate_rsna() -> dict:
     manifest_path = MANIFEST_DIR / "rsna_checksums.json"
     if not manifest_path.exists():
         return {"dataset": "rsna", "status": "skipped", "reason": "no manifest found (RSNA not yet downloaded)"}
-    # Populated once scripts/download_rsna.py has been run.
+
     manifest = json.loads(manifest_path.read_text())
-    return {"dataset": "rsna", "status": "manifest_present", "num_files_manifested": manifest["num_files"]}
+    raw_root = REPO_ROOT / "data" / "raw" / "rsna"
+
+    checksum_mismatches: list[str] = []
+    corrupt_files: list[str] = []
+    rows: list[int] = []
+    cols: list[int] = []
+    photometric: Counter = Counter()
+    rescale_present = 0
+    rescale_absent = 0
+
+    for entry in manifest["files"]:
+        path = raw_root / entry["relative_path"]
+        if not path.exists():
+            checksum_mismatches.append(entry["relative_path"] + " (missing)")
+            continue
+        if _sha256(path) != entry["sha256"]:
+            checksum_mismatches.append(entry["relative_path"])
+
+        try:
+            ds = pydicom.dcmread(path)
+            _ = ds.pixel_array  # forces pixel data decode, catches corrupt/truncated files
+            rows.append(int(ds.Rows))
+            cols.append(int(ds.Columns))
+            photometric[str(getattr(ds, "PhotometricInterpretation", "MISSING"))] += 1
+            if hasattr(ds, "RescaleSlope") or hasattr(ds, "RescaleIntercept"):
+                rescale_present += 1
+            else:
+                rescale_absent += 1
+        except Exception as exc:  # noqa: BLE001 — any decode failure counts as corrupt
+            corrupt_files.append(f"{entry['relative_path']}: {exc}")
+
+    report = {
+        "dataset": "rsna",
+        "status": "ok" if not checksum_mismatches and not corrupt_files else "issues_found",
+        "num_files_manifested": len(manifest["files"]),
+        "checksum_mismatches": checksum_mismatches,
+        "corrupt_files": corrupt_files,
+        "image_size": {
+            "rows": {"min": min(rows), "max": max(rows), "mean": round(statistics.mean(rows), 1)},
+            "columns": {"min": min(cols), "max": max(cols), "mean": round(statistics.mean(cols), 1)},
+        } if rows else None,
+        "photometric_interpretation_counts": dict(photometric),
+        "rescale_slope_intercept": {
+            "present": rescale_present,
+            "absent": rescale_absent,
+            "note": (
+                "Absent means the DICOM stores raw pixel values with no linear "
+                "rescale to apply; present means RescaleSlope/RescaleIntercept must "
+                "be applied before display or CLAHE (ADR-6) — verify which case "
+                "applies before Stage 6 preprocessing, per CLAUDE.md's flagged "
+                "DICOM pixel-handling risk."
+            ),
+        },
+        "label_balance": _label_balance(raw_root),
+    }
+    return report
 
 
 def main() -> int:
