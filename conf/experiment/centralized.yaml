@@ -1,0 +1,23 @@
+# Stage 12 — centralized pooled baseline (ablation row 2): the privacy-free ceiling
+# every later federated/private result is compared against.
+#
+# Identical protocol to conf/experiment/local.yaml (same architecture, hyperparameters,
+# seeds, class-imbalance handling) — only the training data differs (pooled across all
+# hospitals instead of per-hospital) — so the comparison is fair.
+
+hospitals: [A, B, C]
+
+partition_files:
+  natural: data/partitions/hospitals_natural.json
+  balanced: data/partitions/hospitals_natural_balanced.json
+
+seeds: [42, 123, 2024] # >= 3 seeds, per CLAUDE.md section 11.2 — same seeds as Stage 11
+
+training:
+  num_epochs: 30
+  lr: 0.001
+  batch_size: 32
+  patience: 5
+
+mlflow:
+  experiment_name: centralized_baseline
