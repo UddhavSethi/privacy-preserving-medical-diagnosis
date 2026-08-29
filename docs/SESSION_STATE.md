@@ -6,7 +6,8 @@ document — this file is a status snapshot, not a replacement for it. Read `CLA
 and `docs/IMPLEMENTATION_PLAN.md` in full before acting; this is a pointer/summary layer
 on top of them.
 
-**Last updated:** 2026-08-29, end of Phase 1 / Stage 4.
+**Last updated:** 2026-08-29, Stage 5 code complete, awaiting DG-3 for the final headline
+partition choice.
 
 ---
 
@@ -154,21 +155,25 @@ re-asserted by a dedicated test against the live files).
 | 1 — Pinned Python 3.11 env | **Done** | `4ab5922` |
 | 2 — Config, seeding, MLflow tracking | **Done**, 8/8 tests passing | `86e36a7` |
 | 3 — Dataset acquisition & validation | **Done**, both datasets, zero data-integrity issues | `3aea1f0` (Kermany), `74c6ea5` (RSNA) |
-| 4 — Label harmonization & patient-level splitting | **Done** — DG-2 applied, both sources fully patient-grouped, 18 tests passing, splits frozen in `data/partitions/{kermany,rsna}_splits.json` | (pending commit this session) |
-| 5 — Hospital partitioning | Not started (DG-3 — client-size-imbalance handling — still open, raise before finishing this stage) | — |
+| 4 — Label harmonization & patient-level splitting | **Done** — DG-2 applied, both sources fully patient-grouped, 18 tests passing, splits frozen in `data/partitions/{kermany,rsna}_splits.json` | `28131be` |
+| 5 — Hospital partitioning | **Code complete, 25/25 tests passing.** Natural partition (Kermany=A, RSNA→B/C, full imbalance) and a Dirichlet alpha-sweep demo are built and on disk. **DG-3 (below) is open — do not treat this stage as finished/committed until it's answered**, since the answer may add a size-balanced variant alongside the natural one. | (uncommitted) |
 | 6 — CLAHE preprocessing + cache | Not started | — |
 | 7 — torchvision transforms/Dataset/DataLoader | Not started | — |
 | 8–23 | Not started | — |
 
-**Phase 0 (Stages 0–2) and Phase 1's Stages 3–4 are complete. Stage 5 is next.**
+**Phase 0 (Stages 0–2) and Phase 1's Stages 3–4 are complete. Stage 5's code is written
+and its natural/Dirichlet outputs generated, but not yet committed — blocked on DG-3.**
 
 ## 8. Pending decisions / open decision gates
 
 - **DG-2 (label harmonization): RESOLVED and applied**, see §4.
-- **DG-3 (hospital-size imbalance handling, Stage 5):** open. Kermany (~5,860 images)
-  vs. RSNA (~29,684 images) is a large natural imbalance. Plan recommends reporting
-  both balanced and natural-imbalance results rather than picking one — not yet
-  discussed with owner in depth.
+- **DG-3 (hospital-size imbalance handling, Stage 5): OPEN, blocking.** Measured (not
+  estimated) via `scripts/build_partitions.py`: natural partition gives Hospital A
+  (Kermany) 5,856 images / 3,081 patients vs. Hospitals B and C (RSNA shards) 13,342
+  images / 13,342 patients **each** — roughly 4.5x. The plan's own recommendation is to
+  report both the natural-imbalance and a size-balanced variant rather than picking
+  one, but this has not been put to the owner as an explicit choice yet — do that
+  before treating Stage 5 as finished.
 - **Dropout placement** (head-only vs. after dense blocks, `CLAUDE.md` §14 item, needed
   at Stage 8): open.
 - **Target epsilon values** for the DP sweep + delta relative to dataset size (needed
@@ -234,10 +239,14 @@ is unsure before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-Stage 5 — hospital partitioning (`src/data/partitioning.py`,
-`conf/data/partition_natural.yaml`, `conf/data/partition_dirichlet.yaml`): assign
-Kermany's frozen split to Hospital A as-is, and split RSNA's frozen split into two
-patient-disjoint shards for Hospitals B and C (natural non-IID), plus a configurable
-Dirichlet-alpha synthetic partitioner for controlled sweeps. **Raise DG-3
-(hospital-size imbalance: balance shard sizes vs. keep natural imbalance vs. report
-both) with the owner before finishing this stage** — do not decide it unilaterally.
+Stage 5's code, tests, configs, natural partition, and Dirichlet-sweep demo are all
+built (see §7) but the resulting **DG-3 question has been put to the owner and is
+awaiting an answer**: keep the natural ~4.5x imbalance as the headline result, add a
+size-balanced variant (e.g. subsample RSNA shards down toward Kermany's size) as an
+additional config, or report both. Once answered:
+
+1. If a balanced variant is wanted, add it to `src/data/partitioning.py` /
+   `scripts/build_partitions.py` and regenerate.
+2. Commit Stage 5 (code + whichever partition JSON(s) are wanted) and update this file.
+3. Move to Stage 6 (OpenCV CLAHE preprocessing + cache, ADR-6) — first REQUIRED stage
+   of Phase 2, no open decision gates block it.

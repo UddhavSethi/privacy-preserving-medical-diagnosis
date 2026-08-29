@@ -1,0 +1,178 @@
+{
+  "scheme": "dirichlet_sweep",
+  "note": "Per-client label distribution at each alpha, pooling both sources. Demonstrates the sweep required by Stage 5's testing criteria; not a headline result.",
+  "num_clients": 5,
+  "seed": 2000,
+  "alphas": [
+    0.1,
+    0.5,
+    1.0,
+    10.0
+  ],
+  "summary_by_alpha": {
+    "0.1": {
+      "client-0": {
+        "num_images": 5129,
+        "num_patients": 4314,
+        "label_counts": {
+          "Normal": 1801,
+          "Pneumonia": 3328
+        }
+      },
+      "client-1": {
+        "num_images": 0,
+        "num_patients": 0,
+        "label_counts": {}
+      },
+      "client-2": {
+        "num_images": 2676,
+        "num_patients": 2096,
+        "label_counts": {
+          "Pneumonia": 2676
+        }
+      },
+      "client-3": {
+        "num_images": 4487,
+        "num_patients": 3432,
+        "label_counts": {
+          "Normal": 208,
+          "Pneumonia": 4279
+        }
+      },
+      "client-4": {
+        "num_images": 20248,
+        "num_patients": 19923,
+        "label_counts": {
+          "Normal": 20246,
+          "Pneumonia": 2
+        }
+      }
+    },
+    "0.5": {
+      "client-0": {
+        "num_images": 6402,
+        "num_patients": 5720,
+        "label_counts": {
+          "Normal": 3710,
+          "Pneumonia": 2692
+        }
+      },
+      "client-1": {
+        "num_images": 17691,
+        "num_patients": 17022,
+        "label_counts": {
+          "Normal": 15854,
+          "Pneumonia": 1837
+        }
+      },
+      "client-2": {
+        "num_images": 540,
+        "num_patients": 453,
+        "label_counts": {
+          "Normal": 260,
+          "Pneumonia": 280
+        }
+      },
+      "client-3": {
+        "num_images": 2440,
+        "num_patients": 1885,
+        "label_counts": {
+          "Normal": 2,
+          "Pneumonia": 2438
+        }
+      },
+      "client-4": {
+        "num_images": 5467,
+        "num_patients": 4685,
+        "label_counts": {
+          "Normal": 2429,
+          "Pneumonia": 3038
+        }
+      }
+    },
+    "1.0": {
+      "client-0": {
+        "num_images": 4571,
+        "num_patients": 4341,
+        "label_counts": {
+          "Normal": 3645,
+          "Pneumonia": 926
+        }
+      },
+      "client-1": {
+        "num_images": 4228,
+        "num_patients": 3688,
+        "label_counts": {
+          "Normal": 2293,
+          "Pneumonia": 1935
+        }
+      },
+      "client-2": {
+        "num_images": 15952,
+        "num_patients": 15483,
+        "label_counts": {
+          "Normal": 14948,
+          "Pneumonia": 1004
+        }
+      },
+      "client-3": {
+        "num_images": 2260,
+        "num_patients": 1801,
+        "label_counts": {
+          "Normal": 238,
+          "Pneumonia": 2022
+        }
+      },
+      "client-4": {
+        "num_images": 5529,
+        "num_patients": 4452,
+        "label_counts": {
+          "Normal": 1131,
+          "Pneumonia": 4398
+        }
+      }
+    },
+    "10.0": {
+      "client-0": {
+        "num_images": 5193,
+        "num_patients": 4866,
+        "label_counts": {
+          "Normal": 4006,
+          "Pneumonia": 1187
+        }
+      },
+      "client-1": {
+        "num_images": 5330,
+        "num_patients": 4726,
+        "label_counts": {
+          "Normal": 2978,
+          "Pneumonia": 2352
+        }
+      },
+      "client-2": {
+        "num_images": 8293,
+        "num_patients": 7746,
+        "label_counts": {
+          "Normal": 6238,
+          "Pneumonia": 2055
+        }
+      },
+      "client-3": {
+        "num_images": 6707,
+        "num_patients": 5871,
+        "label_counts": {
+          "Normal": 3637,
+          "Pneumonia": 3070
+        }
+      },
+      "client-4": {
+        "num_images": 7017,
+        "num_patients": 6556,
+        "label_counts": {
+          "Normal": 5396,
+          "Pneumonia": 1621
+        }
+      }
+    }
+  }
+}

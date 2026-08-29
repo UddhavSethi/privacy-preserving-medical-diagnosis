@@ -1,0 +1,16 @@
+# Synthetic non-IID hospital assignment (Stage 5): a controlled Dirichlet-alpha sweep,
+# independent of the natural Kermany/RSNA source boundary. Complements
+# partition_natural.yaml per CLAUDE.md section 8's "both regimes must be supported"
+# requirement.
+
+scheme: dirichlet
+
+num_clients: 5
+alpha: 0.5 # lower = more skewed/non-IID per-client label distributions; higher = closer to IID
+
+# Which frozen (Stage 4) source splits to pool before partitioning. "both" pools
+# Kermany + RSNA patients together — meaningful only if their differing label semantics
+# (DG-2) and image domains are acceptable to mix; kermany/rsna alone are also valid.
+pool: both
+
+seed: 2000 # independent of client_sampling_seed (conf/config.yaml)

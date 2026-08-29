@@ -1,0 +1,24 @@
+# Natural non-IID hospital assignment (Stage 5).
+#
+# Kermany is a genuinely different population/institution/label-scheme from RSNA, so
+# this reflects real cross-institutional heterogeneity rather than a synthetic split —
+# the preferred regime per CLAUDE.md section 8.
+
+scheme: natural
+
+hospitals:
+  A:
+    source: kermany
+    # Kermany is small enough (5,856 images) that it is used whole, undivided — see
+    # data/partitions/kermany_splits.json for its frozen train/val/test.
+  B:
+    source: rsna
+    shard: B
+  C:
+    source: rsna
+    shard: C
+
+# Seed for the patient-disjoint, label-stratified 2-way split of RSNA's pool into
+# shards B and C (src/data/partitioning.py::natural_shard_rsna). Independent of
+# data_partition_seed (conf/config.yaml), which governs the train/val/test split.
+rsna_shard_seed: 1000
