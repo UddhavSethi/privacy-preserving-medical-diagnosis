@@ -1,0 +1,33 @@
+{
+  "dataset": "kermany",
+  "status": "ok",
+  "num_files_manifested": 5856,
+  "counts_per_split_per_class": {
+    "test": {
+      "NORMAL": 234,
+      "PNEUMONIA": 390
+    },
+    "train": {
+      "NORMAL": 1349,
+      "PNEUMONIA": 3883
+    }
+  },
+  "checksum_mismatches": [],
+  "corrupt_files": [],
+  "image_size": {
+    "width": {
+      "min": 384,
+      "max": 2916,
+      "mean": 1328.5
+    },
+    "height": {
+      "min": 127,
+      "max": 2713,
+      "mean": 974.2
+    }
+  },
+  "notes": [
+    "No official validation split in this source (train/test only) \u2014 a val split must be carved from train at Stage 4/5, consistent with CLAUDE.md's note that Kermany's official val split is unusably small anyway.",
+    "Normal-class filenames do not carry a patient identifier (only pneumonia-class filenames do, as 'personNNN_bacteria/virus_NNN.jpeg') \u2014 patient-level grouping is only partially possible for this dataset (ADR-7 limitation)."
+  ]
+}
