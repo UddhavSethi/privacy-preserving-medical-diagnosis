@@ -665,6 +665,35 @@ must be raised, discussed and approved before any work begins.
   the deferral decision.
 - **Extended privacy/utility trade-off analysis** beyond the baseline epsilon sweep.
 
+### 16.1a Approved optional extensions (approved in concept 2026-08-29; implementation awaits a separate explicit go-ahead)
+
+Two extensions the owner raised, evaluated, and approved as concepts — **neither is part of
+the core 24-stage critical path**, both remain clearly optional, and neither is to be
+implemented until the owner separately approves the documentation diff that added them here.
+Full stage-style write-ups (goal, files, dependencies, prerequisites, testing, risks): `docs/IMPLEMENTATION_PLAN.md`, Phase 6, OPT-5 and OPT-6.
+
+- **OPT-5 — Isolation Forest OOD detection gate.** Detects anomalous/out-of-distribution
+  chest X-rays (wrong modality, corrupted scans, unfamiliar population) at inference time —
+  **not** anomalous federated client/model updates. That interpretation was considered and
+  rejected: CLAUDE.md section 6 already documents that Secure Aggregation and Byzantine
+  update-inspection are directly opposed, and section 16.2 already prohibits Byzantine/
+  poisoning detection without separate approval. This extension does not touch Secure
+  Aggregation, FedAvg, or the federated update path in any way — it runs entirely client-side
+  on already-local data, using the 1024-dim pooled backbone feature vector Stage 8/9 already
+  produce. One `IsolationForest` per hospital (not federated — it isn't a parametric model
+  that can be `FedAvg`'d; each hospital trains its own, consistent with data never leaving a
+  hospital). No new dependency (`scikit-learn` is already pinned). Prerequisites: Stages 9
+  and 11. Proposed placement: Phase 4, alongside Stage 18 (Grad-CAM) and Stage 19 (MC
+  Dropout).
+- **OPT-6 — Streamlit demo interface.** A presentation-only layer over an already-trained
+  checkpoint: prediction, MC Dropout confidence/deferral (Stage 19), Grad-CAM overlay (Stage
+  18), and the OOD flag (OPT-5) if built. Does not touch training, evaluation, privacy
+  guarantees, or the FL pipeline. Requires one new dependency (`streamlit`), which itself
+  needs the section 17.3 dependency-approval process before it is added — approving this
+  extension's concept is not the same as approving that dependency addition. Prerequisites:
+  Stages 11, 18, 19 (OPT-5 optional). Proposed placement: Phase 5, after Stage 21, in a new
+  top-level `app/` directory (not `src/`, since it is an entry point, not library code).
+
 ### 16.2 Explicit future work — do NOT implement unless explicitly approved
 
 - Byzantine participant detection

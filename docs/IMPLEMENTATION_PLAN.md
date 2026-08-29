@@ -902,7 +902,11 @@ Strict ordering applies throughout this phase: no federated learning before a wo
 
 # PHASE 6 — Optional research extensions
 
-None of these begin without explicit approval, per CLAUDE.md section 16.1.
+None of these begin without explicit approval, per CLAUDE.md section 16.1. OPT-5 and OPT-6
+(added 2026-08-29) have been approved as concepts by the owner — see CLAUDE.md section
+16.1a — but implementation itself awaits a further explicit go-ahead on top of that; they
+are documented here so their scope, cost and stage placement are on record before that
+happens, not as a signal to begin.
 
 ## OPT-1 — Calibration metrics
 **Class:** OPT  **Size:** S — highest value per unit of effort
@@ -923,6 +927,48 @@ Pointing game or intersection-over-union evaluation against RSNA bounding boxes,
 **Class:** OPT  **Size:** M
 
 Snapshot ensembling across recent federated rounds, which is nearly free since it requires no extra training, or conformal prediction providing distribution-free coverage guarantees on the deferral decision. Conformal prediction is the more interesting contribution and maps directly onto the human-in-the-loop objective. The risk is that federated conformal calibration under non-IID clients is genuinely subtle. Prerequisites: Stages 19 and 21.
+
+## OPT-5 — Isolation Forest OOD detection gate
+**Class:** OPT  **Size:** S  **Approved in concept 2026-08-29; implementation awaits a separate explicit go-ahead**
+
+**1. Goal.** A client-side safety gate that flags chest X-rays whose frozen-backbone features are anomalous relative to the training distribution — a genuinely different failure mode from MC Dropout's epistemic uncertainty, which implicitly assumes the input is roughly in-distribution and can be confidently wrong on inputs that aren't.
+
+**2. What we implement.** One `sklearn.ensemble.IsolationForest` **per hospital** — not a single federated/global detector. Isolation Forest is not a parametric model, so it cannot be `FedAvg`'d the way the classifier head can; each hospital trains its own detector on its own cached features, which is also the architecturally consistent choice (nothing new leaves a hospital). Trained on the **full in-distribution training feature set, both classes** — training on Normal-only would make it partially redundant with the classifier itself (a density estimate correlated with "is this Pneumonia") rather than a genuine domain-shift/corruption detector. Input: the 1024-dim pooled backbone feature vector Stage 8's `DenseNet121Head.pooled_features()` produces and Stage 9 already caches — zero new feature engineering. At inference, score a new image and flag it if the anomaly score exceeds a configurable threshold.
+
+**3. Files created.** `src/uncertainty/ood_detector.py`, `scripts/build_ood_detector.py`, `conf/uncertainty/ood.yaml`.
+
+**4. Dependencies required.** None new — `scikit-learn` is already pinned and approved (CLAUDE.md section 4).
+
+**5. Prerequisites.** Stage 9 (feature cache, for the input features) and Stage 11 (a trained model, so "in-distribution" is defined against an actual trained baseline rather than an untrained one).
+
+**6. Testing and validation.** Synthetic non-chest-X-ray inputs (random noise, a natural-image photo) score as anomalous; held-out in-distribution val-set images mostly score as normal (a false-positive-rate check); deterministic given seed.
+
+**7. Expected output.** A second, complementary deferral signal alongside MC Dropout's, covering a different failure mode (OOD input) rather than duplicating coverage of the same one (low-confidence in-distribution input).
+
+**8. Risks.** The anomaly-score threshold is a clinical-policy decision, like Stage 19's DG-10 deferral threshold, not a tuning parameter — needs the same explicit justification, not a default. Per-hospital detectors mean a hospital with less local data gets a noisier detector, which should be reported honestly rather than hidden. **Does not integrate with, and must never be made to integrate with, Secure Aggregation or the FedAvg update path** — the "detect anomalous federated client/model updates" interpretation of Isolation Forest was considered and explicitly rejected (see CLAUDE.md section 16.1a) because it conflicts with SecAgg+'s guarantee that the server never sees individual updates (ADR-3), and because malicious-client defense is out of scope for this phase (CLAUDE.md section 6, section 16.2).
+
+**9. Architecture change?** No change to any approved component (CLAUDE.md sections 4-10) or the threat model. Recorded as an approved-in-concept optional extension in CLAUDE.md section 16.1a; implementation is a separate go-ahead.
+
+## OPT-6 — Streamlit demo interface
+**Class:** OPT  **Size:** S-M  **Approved in concept 2026-08-29; implementation awaits a separate explicit go-ahead**
+
+**1. Goal.** A presentation/demonstration layer over a single already-trained checkpoint — explicitly not research infrastructure. Does not touch training, evaluation, privacy guarantees, or the federated pipeline in any way; only ever consumes a finished model for one-off inference.
+
+**2. What we implement.** A Streamlit app: upload/select a chest X-ray, run it through the same CLAHE + transform pipeline used in training, and show the prediction and probability, MC Dropout confidence with the deferral flag (Stage 19), the Grad-CAM heatmap overlay (Stage 18), and the OOD flag (OPT-5) if that extension exists. Optionally a checkpoint selector across epsilon values / DP on-off / natural vs. balanced partition, making the privacy-utility tradeoff from the ablation table visually tangible for a thesis defense or talk rather than only a table row.
+
+**3. Files created.** `app/streamlit_app.py`, `conf/app.yaml` — a new top-level `app/` directory, not `src/`, since this is an entry point/demo, not library code the rest of the project imports.
+
+**4. Dependencies required.** `streamlit` — new. Requires the CLAUDE.md section 17.3 dependency-approval process (state the change, ask permission, then add) as a separate step from approving this extension's concept.
+
+**5. Prerequisites.** Stages 11 (trained model), 18 (Grad-CAM), 19 (MC Dropout). OPT-5 is optional — the OOD flag is only shown if that extension was also built.
+
+**6. Testing and validation.** A basic smoke test that the app imports cleanly and its inference-calling function produces the expected shape/types. Not a full pytest suite in the sense CLAUDE.md section 11.3 requires elsewhere — UI code is not privacy-critical, so it falls outside "every privacy-relevant claim is backed by a test" (section 17.5).
+
+**7. Expected output.** A shareable, interactive demonstration of the trained system for a thesis defense, conference talk, or reviewer walkthrough.
+
+**8. Risks.** Purely a presentation risk — a broken demo is embarrassing, not a research-validity problem, and does not affect any reported result. Must never become a dependency of any other stage; if it breaks, nothing else in the project should be affected.
+
+**9. Architecture change?** Adds one new pinned dependency (`streamlit`), pending explicit approval per section 17.3. No change to any other approved component.
 
 ---
 
@@ -958,6 +1004,8 @@ Snapshot ensembling across recent federated rounds, which is nearly free since i
 | OPT-2 | Empirical privacy attacks | OPT | L | — |
 | OPT-3 | Quantitative Grad-CAM | OPT | M | — |
 | OPT-4 | Stronger uncertainty | OPT | M | — |
+| OPT-5 | Isolation Forest OOD gate | OPT | S | — |
+| OPT-6 | Streamlit demo interface | OPT | S-M | — |
 
 ## 2. Dependency order between stages
 
@@ -985,8 +1033,11 @@ Snapshot ensembling across recent federated rounds, which is nearly free since i
                                                 v
                                             22 -> 23
                                                 v
-                                    OPT-1 . OPT-2 . OPT-3 . OPT-4
+                            OPT-1 . OPT-2 . OPT-3 . OPT-4 . OPT-5 -> OPT-6
 ```
+
+OPT-5 depends on Stages 9 and 11 (not shown above to keep the core critical-path diagram
+readable); OPT-6 depends on Stages 11, 18, 19, and optionally OPT-5.
 
 **Hard ordering constraints**
 
