@@ -28,7 +28,14 @@ from src.data.partitioning import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PARTITIONS_DIR = REPO_ROOT / "data" / "partitions"
 
-RSNA_SHARD_SEED = 1000
+# RSNA_SHARD_SEED must NEVER equal conf/config.yaml's data_partition_seed (1000), which
+# Stage 4 (src/data/splitting.py) already used for a sorted-list-then-shuffle split over
+# this same patient population. Reusing that seed here reproduces the identical
+# permutation, so cutting it in half for B/C silently reproduces Stage 4's test/val/train
+# cut points instead of producing an independent shard split — a real bug found and
+# fixed during Stage 11 (Hospital C ended up with zero val/test records; Hospital B
+# absorbed all of RSNA's val+test). See tests/test_partitioning.py's regression test.
+RSNA_SHARD_SEED = 5000
 BALANCE_SEED = 1500
 DIRICHLET_SEED = 2000
 DIRICHLET_NUM_CLIENTS = 5

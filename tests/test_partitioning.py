@@ -1,4 +1,7 @@
 import statistics
+from collections import Counter
+
+import pytest
 
 from src.data.partitioning import (
     assert_no_patient_overlap_across_hospitals,
@@ -131,3 +134,35 @@ def test_subsample_deterministic_given_seed():
     a = subsample_to_size(records, target_num_images=100, seed=1500)
     b = subsample_to_size(records, target_num_images=100, seed=1500)
     assert sorted(r["patient_id"] for r in a) == sorted(r["patient_id"] for r in b)
+
+
+def test_natural_shard_proportional_across_upstream_split_when_seed_differs():
+    """Regression test for a real bug found in Stage 11: natural_shard_rsna's default
+    seed (1000) was the same seed Stage 4's grouped_stratified_split used on this same
+    patient population. Both sort the patient list then shuffle with
+    random.Random(seed), so the same seed reproduces the identical permutation —
+    cutting it in half for B/C silently reproduced Stage 4's test/val/train cut points
+    instead of an independent split (Hospital C ended up with zero val/test records;
+    Hospital B absorbed all of RSNA's val+test). This exercises the real
+    grouped_stratified_split function, not a simulation of it, and asserts each shard
+    gets a roughly proportional mix of every upstream frozen_split value when a
+    different seed is used, which is what production code (scripts/build_partitions.py)
+    must always do.
+    """
+    from src.data.splitting import grouped_stratified_split
+
+    records = _make_records(num_normal_patients=400, num_pneumonia_patients=200, images_per_patient=1)
+    prior_split = grouped_stratified_split(records, val_frac=0.15, test_frac=0.15, seed=1000)
+    combined = [
+        {**r, "frozen_split": split_name}
+        for split_name, recs in prior_split.items()
+        for r in recs
+    ]
+
+    shards = natural_shard_rsna(combined, seed=5000)  # deliberately different from 1000
+    for shard_name, recs in shards.items():
+        counts = Counter(r["frozen_split"] for r in recs)
+        total = sum(counts.values())
+        assert counts["train"] / total == pytest.approx(0.70, abs=0.1), shard_name
+        assert counts["val"] / total == pytest.approx(0.15, abs=0.1), shard_name
+        assert counts["test"] / total == pytest.approx(0.15, abs=0.1), shard_name

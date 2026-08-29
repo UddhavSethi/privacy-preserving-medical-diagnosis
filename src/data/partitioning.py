@@ -26,6 +26,15 @@ def natural_shard_rsna(records: list[dict], seed: int = 1000) -> dict[str, list[
     """Split RSNA's full patient pool into two patient-disjoint, label-stratified
     shards: Hospital B and Hospital C. A patient's Stage 4 train/val/test assignment
     is preserved regardless of which shard they land in.
+
+    **`seed` must differ from whatever seed Stage 4's `grouped_stratified_split` used
+    on this same patient population** (`conf/config.yaml`'s `data_partition_seed`).
+    Both functions sort the patient list and shuffle it with `random.Random(seed)`;
+    the same seed over the same population reproduces the identical permutation, so
+    cutting it in half here would silently reproduce Stage 4's test/val/train cut
+    points instead of an independent split. This is not a theoretical risk — it
+    happened (see `scripts/build_partitions.py`'s `RSNA_SHARD_SEED` comment and
+    `tests/test_partitioning.py`'s regression test).
     """
     by_patient: dict[str, list[dict]] = defaultdict(list)
     patient_label: dict[str, str] = {}
