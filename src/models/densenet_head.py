@@ -36,14 +36,16 @@ class DenseNet121Head(nn.Module):
         freeze_module(self.features)
         freeze_batchnorm(self.features)
 
-        self.head = nn.Sequential(
-            nn.AdaptiveAvgPool2d((1, 1)),
-            nn.Flatten(),
+        # Split into a parameter-free pooling step and the trainable classifier so
+        # Stage 9's feature cache can store pooled_features(x) output (1024-dim) and
+        # later train only `classifier` on it, without re-running the backbone.
+        self.pool = nn.Sequential(nn.AdaptiveAvgPool2d((1, 1)), nn.Flatten())
+        self.classifier = nn.Sequential(
             nn.Linear(num_backbone_features, hidden_dim),
             # inplace=False: Opacus's per-sample-gradient hooks (GradSampleModule) need
             # to track intermediate activations by view; an in-place ReLU here breaks
             # that and raises at backward time — confirmed empirically while validating
-            # this stage, not a theoretical concern.
+            # Stage 8, not a theoretical concern.
             nn.ReLU(inplace=False),
             nn.Dropout(p=dropout_rate),  # deliberately inserted — see module docstring
             nn.Linear(hidden_dim, num_classes),
@@ -58,11 +60,19 @@ class DenseNet121Head(nn.Module):
         self.features.eval()
         return self
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def pooled_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Everything up to but not including the trainable classifier: frozen
+        backbone -> ReLU -> pool -> flatten. This is exactly what Stage 9's feature
+        cache precomputes and stores (`src/data/feature_cache.py`), since it is a pure
+        function of a frozen model — identical input always yields identical output.
+        """
         features = self.features(x)
         # DenseNet's own final backbone layer (features.norm5) is a BatchNorm with no
         # trailing activation baked in — replicate torchvision's own forward() here,
         # since self.features is used standalone rather than through the full
         # DenseNet.forward().
         features = torch.relu(features)  # torch.relu is always out-of-place
-        return self.head(features)
+        return self.pool(features)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.classifier(self.pooled_features(x))
