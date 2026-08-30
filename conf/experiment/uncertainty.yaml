@@ -1,0 +1,22 @@
+# Stage 19 — Monte Carlo Dropout and deferral (CLAUDE.md section 10, objective 6's
+# confidence half). Documentation mirror of the values `src/uncertainty/{mc_dropout,
+# deferral}.py`'s defaults already encode — nothing currently loads this file via
+# Hydra (matches this project's convention for infra/reporting-style stages, e.g.
+# Stage 16's conf/federated/tls.yaml), kept alongside every other stage's config for
+# discoverability.
+
+mc_dropout:
+  num_passes: 20 # T — common range in the literature is ~20-50; 20 is a reasonable
+    # default for this project's hardware ceiling (CLAUDE.md section 7), not itself a
+    # clinical policy decision (unlike the deferral threshold below).
+  dropout_rate: 0.3 # fixed at Stage 8 — head-only Dropout(p=0.3), not reconfigured here.
+  uncertainty_metric: predictive_entropy # owner-approved 2026-08-30, over predictive
+    # variance — standard for classification uncertainty, naturally bounded and
+    # directly interpretable.
+
+deferral:
+  # Decision Gate DG-10 (owner-approved 2026-08-30): fixed coverage target, not a
+  # hand-picked raw entropy cutoff. Defers the highest-uncertainty
+  # target_defer_fraction of predictions to human clinician review; the actual
+  # entropy threshold is DERIVED from each run's uncertainty distribution.
+  target_defer_fraction: 0.10 # defer the worst 10% by predictive entropy

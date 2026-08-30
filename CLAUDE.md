@@ -451,6 +451,12 @@ Qualitative heatmaps alone are illustrative, not a result. Quantitative Grad-CAM
 - **Honest framing:** MC Dropout is a known-weak uncertainty estimator and is often poorly
   calibrated. It is the approved baseline because the source deck mandates it and it is cheap.
   Stronger methods and calibration metrics are **pending optional directions** (§16.1).
+- **Resolved (Stage 19, DG-10, owner-approved 2026-08-30):** uncertainty metric is predictive
+  entropy of the mean predictive distribution across T=20 passes. Deferral policy is a **fixed
+  coverage target** — the highest-uncertainty `target_defer_fraction` of predictions (default
+  10%) are deferred, with the entropy cutoff itself derived from each run's actual uncertainty
+  distribution rather than a hand-picked raw threshold. See §14's resolved decisions for the
+  real validation numbers.
 
 ---
 
@@ -575,9 +581,9 @@ touch them.
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), all of Phase 3 (Stages 13–17), and Phase 4's Stage 18 complete — FedAvg, Differential Privacy, Secure Aggregation, TLS/client authentication and Docker Compose deployment all verified live end-to-end (see prior entries in git history); Grad-CAM explainability (ADR-1 compatible, verified with a real trained checkpoint) now produces real, non-degenerate, class-discriminative heatmaps over real chest X-rays, batch-generated across TP/FP/TN/FN cases and logged to MLflow. Stage 19 (MC Dropout) not yet started. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
+| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), all of Phase 3 (Stages 13–17), and Phase 4's Stages 18–19 complete — FedAvg, Differential Privacy, Secure Aggregation, TLS/client authentication and Docker Compose deployment all verified live end-to-end (see prior entries in git history); Grad-CAM explainability produces real, non-degenerate, class-discriminative heatmaps over real chest X-rays; Monte Carlo Dropout + deferral (DG-10 resolved) verified on the real pooled test set — retained-case accuracy (86.3%) exceeds overall accuracy (83.2%) after deferring the worst 10% by predictive entropy. Phase 4 is now complete. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
 | Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`. |
-| Tests | 125 passing |
+| Tests | 134 passing |
 
 ### Resolved decisions
 
@@ -679,6 +685,20 @@ touch them.
    build, a TLS SAN mismatch for the `superlink` Compose hostname, and a
    registration-before-connection race condition), in `docs/SESSION_STATE.md`
    §7's Stage 17 note.
+
+9. **Decision Gate DG-10 — MC Dropout deferral policy (resolved 2026-08-30,
+   owner-approved).** Fixed coverage target: defer the highest-uncertainty 10%
+   of predictions (by predictive entropy, T=20 stochastic passes) to human
+   clinician review; the entropy cutoff is derived from each run's actual
+   uncertainty distribution, not a hand-picked raw value. Implemented in
+   `src/uncertainty/{mc_dropout,deferral}.py`. Verified on the real pooled
+   test set (4,838 images, Stage 12's trained centralized checkpoint): mean
+   entropy on misclassified cases (0.613) is meaningfully higher than on
+   correctly classified cases (0.371); at 90% coverage, retained-case accuracy
+   (86.3%) exceeds overall accuracy (83.2%), while the deferred 10%'s own
+   accuracy (55.4%) confirms the mechanism genuinely isolates the hardest
+   cases rather than deferring arbitrarily. Full detail in
+   `docs/SESSION_STATE.md` §7's Stage 19 note.
 
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 

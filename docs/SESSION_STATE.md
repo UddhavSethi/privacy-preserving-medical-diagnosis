@@ -170,8 +170,9 @@ re-asserted by a dedicated test against the live files).
 | 15 — Secure Aggregation with Flower SecAgg+ (ablation row 4) | **Done — real live `flwr run` with SecAgg+ actually masking updates.** SecAgg+ at flwr==1.35.0 only integrates via Flower's legacy Strategy/workflow API (not Stage 13/14's Message-API `strategy.start()`), confirmed against installed source + Flower's own reference example — a genuine API-surface finding, raised with and approved by the owner before implementation. Separate `client_app_secagg.py`/`server_app_secagg.py` app pair. 114/114 tests passing (3 new). See note below the table. | 20cc551 |
 | 16 — TLS + client authentication (ADR-4) | **Done — real TLS + Flower node-authentication validated end-to-end, deployment engine (not simulation), using Stage 13/14's canonical app unmodified (ADR-8 confirmed).** `scripts/generate_certs.sh`, `src/federated/security.py`, `conf/federated/tls.yaml`, `tests/{test_tls_auth,test_security}.py`. 119/119 tests passing (5 new), including a real subprocess-level negative test (unregistered SuperNode rejected) and positive test (registered SuperNode accepted). See note below the table. | e078cee |
 | 17 — Docker Compose multi-client deployment | **Done — real `docker compose` run, 4 separate containers over a real Docker network, all 3 hospitals training every round, clean teardown.** Scope (owner-approved 2026-08-30): FedAvg + TLS/auth only, CPU-only (DG-9). `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}`, `scripts/{run_deployment.sh,prepare_deployment_shards.py}`, `client_app.py`'s `_resolve_config()` addition. Three real bugs found and fixed via live runs, not inspection — see note below the table. Still 119/119 (no new unit tests — infra/deployment stage). | 3ece93a |
-| 18 — Grad-CAM explainability | **Done — real, non-degenerate, class-discriminative heatmaps on real trained checkpoints and real chest X-rays.** A real ADR-1/Grad-CAM interaction the plan itself flagged as needing empirical verification turned out to be a real bug (crash, not silent wrong output) on the first live test run — see note below the table. `src/explain/gradcam.py`, `scripts/generate_explanations.py`. 125/125 tests passing (6 new). | (pending commit this session) |
-| 19–23 | Not started | — |
+| 18 — Grad-CAM explainability | **Done — real, non-degenerate, class-discriminative heatmaps on real trained checkpoints and real chest X-rays.** A real ADR-1/Grad-CAM interaction the plan itself flagged as needing empirical verification turned out to be a real bug (crash, not silent wrong output) on the first live test run — see note below the table. `src/explain/gradcam.py`, `scripts/generate_explanations.py`. 125/125 tests passing (6 new). | 9fcc8af |
+| 19 — Monte Carlo Dropout and deferral | **Done — DG-10 resolved (fixed coverage target, defer worst 10%), verified on the real pooled test set: retained-case accuracy exceeds overall accuracy.** No implementation bugs this time (all 9 new tests passed on first run) — a clean stage after Grad-CAM's real bug. `src/uncertainty/{mc_dropout,deferral}.py`, `conf/experiment/uncertainty.yaml`. 134/134 tests passing (9 new). | (pending commit this session) |
+| 20–23 | Not started — Phase 4 (Stages 18-19) is now complete | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -882,6 +883,70 @@ differ), and the border-energy proxy for "not latching onto scanner
 artifacts/text" (CLAUDE.md's own named chest-X-ray failure mode to check
 for).
 
+**Stage 19 (`src/uncertainty/{mc_dropout,deferral}.py`,
+`conf/experiment/uncertainty.yaml`) — Monte Carlo Dropout and deferral
+(CLAUDE.md §10, objective 6's confidence half). The rare clean stage this
+session: all 9 new tests passed on their first real run, no bugs found —
+notable specifically because Grad-CAM (Stage 18, also flagged as needing
+empirical verification) did surface a real bug on its first run, so this
+wasn't for lack of trying to break it.**
+
+**DG-10 resolved, owner-approved 2026-08-30 (asked explicitly, not
+defaulted silently — the plan's own framing: "a clinical policy choice
+rather than a tuning parameter"):** fixed coverage target — defer the
+highest-predictive-entropy 10% of predictions to human clinician review
+(`src/uncertainty/deferral.py::DEFAULT_TARGET_DEFER_FRACTION = 0.10`); the
+actual entropy cutoff is *derived* from each run's real uncertainty
+distribution rather than a hand-picked number on an otherwise-uninterpretable
+scale. Uncertainty metric: predictive entropy (owner-approved, over
+predictive variance) of the mean predictive distribution across T=20
+stochastic forward passes.
+
+**Mechanism relies entirely on `DenseNet121Head.train()`'s existing Stage 8
+override** (`self.features.eval()` forced permanently, everything else
+follows normal `.train()`/`.eval()` semantics) — calling `model.train()` for
+MC Dropout activates the classifier's `Dropout` while the backbone's
+BatchNorm stays frozen, with zero new code needed to keep that invariant.
+Verified directly, not assumed: a real test confirms the backbone's
+`running_mean` is bit-for-bit unchanged after MC Dropout's repeated forward
+passes.
+
+**Real validation, Stage 12's trained centralized checkpoint (`natural_seed42.pt`)
+against the full real pooled test set (4,838 images) — all of Stage 19's own
+named testing criteria checked with real numbers, not asserted:**
+
+| Metric | Value |
+|---|---|
+| Overall accuracy (all 4,838 predictions) | 83.17% |
+| Mean predictive entropy, correctly classified | 0.371 |
+| Mean predictive entropy, misclassified | 0.613 |
+| Deferral threshold (entropy, derived from 10% target) | 0.688 |
+| Realized coverage | 90.0% (484/4,838 deferred) |
+| Retained-case accuracy (the 90% not deferred) | **86.27%** |
+| Deferred-set accuracy (the 10% sent to review) | 55.37% |
+
+**The core "does this human-in-the-loop mechanism actually help" claim is
+answered with a real number, not assumed**: retained accuracy (86.3%) exceeds
+overall accuracy (83.2%) by ~3 points after deferring only the worst 10% —
+and the deferred set's own accuracy (55.4%, barely above chance) confirms the
+mechanism genuinely isolates the hardest, most ambiguous cases rather than
+deferring arbitrarily. This is a meaningful result *despite* CLAUDE.md's own
+honest framing that head-only MC Dropout is a known-weak, often-poorly-
+calibrated estimator — the separation between correct/misclassified mean
+entropy (0.371 vs. 0.613, a ~65% relative gap) and the accuracy-lift number
+both show it carries real signal even in this documented-weaker form.
+
+**9 new tests (134 total)**: `tests/test_mc_dropout.py` (4) — dropout
+genuinely active (T passes differ, the stage's own named "most common bug in
+this area"), backbone BatchNorm provably stays frozen during MC Dropout,
+predictive entropy is correctly bounded (zero for a certain distribution,
+>ln(2)/2 for maximal 2-class uncertainty), and the real
+misclassified-vs-correct entropy separation above. `tests/test_deferral.py`
+(5) — invalid-fraction rejection, realized deferral rate matches the target
+fraction on synthetic data, deferral rate demonstrably responds to the
+threshold (Stage 19's own named criterion), a zero-fraction edge case defers
+nothing, and the real retained-vs-overall accuracy claim above.
+
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
 (Isolation Forest OOD detection gate, scoped to chest-X-ray anomaly detection only, not
@@ -903,13 +968,17 @@ OPT-6 after Stages 11/18/19 (needs a trained model, Grad-CAM, and MC Dropout).
   label-stratified-subsampled down via `src/data/partitioning.py::subsample_to_size()`,
   never upsampling A) are both frozen and committed. Both should appear in the ablation
   results/paper.
-- **Dropout placement** (head-only vs. after dense blocks, `CLAUDE.md` §14 item, needed
-  at Stage 8): open.
+- **Dropout placement (head-only vs. after dense blocks): RESOLVED in Stage 8, 2026-08-29**
+  — head-only, a single `Dropout(p=0.3)` in the trainable head. See `src/models/densenet_head.py`.
 - **DG-7 (target epsilon values for the DP sweep + delta relative to dataset size):
   RESOLVED 2026-08-29** — delta=1e-5, epsilon sweep {1, 2, 4, 8}, target-epsilon=4.0
   (sweep midpoint) as the `pyproject.toml` config default. See §7's Stage 14 note for
   the two real comparison runs (epsilon=4 and epsilon=1) already completed; epsilon=2
   and epsilon=8 are not yet run — needed for the full ablation-table sweep later.
+- **DG-9 (Stage 17 Docker demonstration scope): RESOLVED 2026-08-30** — CPU-only, few
+  rounds; FedAvg+TLS/auth only. See §7's Stage 17 note.
+- **DG-10 (Stage 19 MC Dropout deferral policy): RESOLVED 2026-08-30** — fixed coverage
+  target, defer worst 10% by predictive entropy. See §7's Stage 19 note.
 - **Client count** / default partition scheme for headline results (needed at Stage 5):
   open, related to DG-3.
 
@@ -967,22 +1036,21 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. Stage 18 is about to be committed on top of `3ece93a`
-(Stage 17) — `src/explain/gradcam.py` (new), `scripts/generate_explanations.py`
-(new), `tests/test_gradcam.py` (new), plus this file's update and a small
-CLAUDE.md §9 implementation note. `outputs/explanations/` (generated PNG
-overlays) is gitignored (`outputs/` already covered) — confirmed absent from
-`git status`. No changes to `pyproject.toml`/`uv.lock` (`grad-cam==1.5.7` was
-already pinned, just unused until now). Check `git log --oneline -5` on
-resume — this file is not re-updated after every single commit within a
-session, only at natural pause points.
+**Branch:** `main`. Stage 19 is about to be committed on top of `9fcc8af`
+(Stage 18) — `src/uncertainty/{mc_dropout,deferral}.py` (new),
+`conf/experiment/uncertainty.yaml` (new), `tests/{test_mc_dropout,test_deferral}.py`
+(new), plus this file's update and a small CLAUDE.md §10 implementation
+note. No changes to `pyproject.toml`/`uv.lock` (no new dependencies — MC
+Dropout needs nothing beyond what's already pinned). Check `git log
+--oneline -5` on resume — this file is not re-updated after every single
+commit within a session, only at natural pause points.
 
 ```
+9fcc8af Stage 18: Grad-CAM explainability
 3ece93a Stage 17: Docker Compose multi-client deployment
 e078cee Stage 16: TLS + client authentication (ADR-4)
 20cc551 Stage 15: Secure Aggregation via Flower SecAgg+ (ablation row 4)
 90bf95f Stage 14: Differential Privacy with formal accounting (ablation row 5) — DG-7 resolved
-915dae5 Stage 13: Flower FedAvg in simulation — FedAvg verified end-to-end (ablation row 3)
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -994,46 +1062,50 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-**Stage 18 is complete — Grad-CAM produces real, verified, non-degenerate,
-class-discriminative heatmaps on real trained checkpoints and real chest
-X-rays.** Despite being a comparatively lower-risk stage than Phase 3 (no
-Flower protocol surface), it still surfaced a real bug on its very first live
-test run, exactly matching the plan's own explicit warning that the
-ADR-1/Grad-CAM interaction "must be verified, not assumed" — see §7's Stage
-18 note for: the real bug (plain `GradCAM` doesn't mark its input
-`requires_grad=True` by default, and with ADR-1's fully-frozen backbone
-nothing else upstream does either, so no gradient graph was ever built —
-fixed by explicitly setting it in `src/explain/gradcam.py`), the softer
-finding about confidently-rejected-class queries legitimately producing
-all-zero heatmaps (not a bug, correct Grad-CAM behavior — the test suite
-distinguishes "renders functionally" from "is non-degenerate for the
-predicted class"), the real batch-generation results (4,838 pooled test
-images, TP=1158/FP=476/TN=2860/FN=344), and the bucket-composition shuffle
-fix (the first run's saved examples were accidentally 100% Kermany).
+**Stage 19 is complete — Phase 4 is entirely done.** DG-10 resolved
+(owner-approved 2026-08-30, asked explicitly rather than defaulted): fixed
+coverage target, defer the worst 10% by predictive entropy across T=20 MC
+Dropout passes. Unlike Grad-CAM (Stage 18), this stage produced **no
+implementation bugs** — all 9 new tests passed on their first real run
+against the real pooled test set and Stage 12's trained checkpoint. See §7's
+Stage 19 note for the full real numbers: retained-case accuracy (86.27%)
+meaningfully exceeds overall accuracy (83.17%) after deferring the worst 10%,
+and the deferred set's own accuracy (55.37%, barely above chance) confirms
+the mechanism genuinely isolates the hardest cases. Mean entropy is
+meaningfully higher on misclassified cases (0.613) than correct ones (0.371)
+— real, checkable evidence that even this documented-weaker (head-only)
+uncertainty estimator carries genuine signal.
 
-Next is **Stage 19 — Monte Carlo Dropout and deferral** (`REQ`, **`M`-sized**,
-**Decision Gate DG-10**) — the confidence half of objective 6, delivering the
-human-in-the-loop mechanism CLAUDE.md requires to actually exist in code, not
-merely be described: the same image passed through the network T times with
-dropout active at inference (Stage 8's head-only `Dropout(p=0.3)`, already in
-place — no architecture change needed here, unlike Grad-CAM's target-layer
-question), yielding a predictive distribution → confidence estimate →
-deferral decision for low-confidence predictions. **DG-10, open and needing
-the owner's input before this stage can be scoped**: the deferral threshold
-policy is explicitly named in the plan as "a clinical policy decision, not a
-hyperparameter" — not something to default silently. Also configurable and
-worth surfacing per CLAUDE.md §10: number of stochastic forward passes T,
-dropout rate (already fixed at 0.3 from Stage 8), and the uncertainty metric
-(predictive entropy vs. variance). Honest framing already established in
-CLAUDE.md §10: MC Dropout is a known-weak, often-poorly-calibrated
-uncertainty estimator — approved as the baseline because it's cheap and the
-source deck mandates it, with stronger methods and calibration metrics
-explicitly deferred to §16.1's optional directions.
+**Both Phase 4 stages (18, 19) are now complete — the entire "clinical trust
+layer" (explainability + confidence-aware deferral) is real, tested, and
+verified against real trained checkpoints, not just described.**
 
-Given Grad-CAM (lower risk than Phase 3, per the note above) still produced a
-real bug on first contact, **the discipline of live-verifying rather than
-assuming continues to matter through the rest of Phase 4** — but the overall
-risk profile remains genuinely lower than anything in Phase 3 (no distributed
-systems, no new external API surface to verify against a pinned version).
-DG-10 is the actual blocker for full scoping; a check-in before starting is
-warranted for that reason specifically, not just as a default pattern.
+Next is **Phase 5 — measurement and delivery**, starting with **Stage 20 —
+overhead instrumentation** (`REQ`, size not yet confirmed in this session's
+reading of the plan — check `docs/IMPLEMENTATION_PLAN.md`'s Stage 20
+write-up directly before scoping). Per CLAUDE.md §11.2, communication
+accounting (bytes transmitted per client per round, wall-clock per round) is
+supposed to be a "first-class measured output, not an afterthought," and
+CLAUDE.md's overhead-reporting requirement (§11.2) explicitly wants DP's and
+SecAgg's overhead attributed *separately*. None of Stages 13-17's live runs
+captured this instrumentation yet — it needs to be added and then likely
+re-run against at least a subset of the already-proven-working stages to
+produce real overhead numbers, not just wired in for future use.
+
+After Stage 20 comes **Stage 21 — the full ablation campaign** (per
+CLAUDE.md §11.1, "the ablation table is the paper"): every row (1-6), proper
+round counts, ≥3 seeds, both partition regimes, the full epsilon sweep
+{1,2,4,8} (only 1 and 4 have real runs so far), and the Dirichlet synthetic
+non-IID sweep (not touched at all this session — only the natural/balanced
+hospital partitions have been used). This is the largest remaining piece of
+work and where most of the actual paper-reportable numbers will come from.
+
+No open decision gate is currently known to block Stage 20. Given Phase 4 is
+now fully closed out and Stage 20/21 represent a shift from "prove each
+mechanism works" (this session's dominant mode across Stages 8-19) to "run
+the real measurement campaign that produces the paper's numbers," **a
+check-in before starting Stage 20 is warranted** as a natural, substantial
+phase-boundary checkpoint — not because of a specific open gate, but because
+Stage 20 defines what gets measured and Stage 21 is a large, resource-intensive
+campaign (many seeds × many configurations) worth scoping deliberately with
+the owner rather than assumed.
