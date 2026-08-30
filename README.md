@@ -59,6 +59,7 @@ dataset, and why.
 | `docs/calibration.md` | OPT-1: ECE, Brier score, and risk-coverage analysis of MC Dropout confidence |
 | `docs/privacy_attack.md` | OPT-2: empirical membership-inference attack against trained checkpoints |
 | `docs/gradcam_localization.md` | OPT-3: quantitative Grad-CAM evaluation against RSNA bounding boxes |
+| `docs/conformal.md` | OPT-4: conformal prediction coverage/set-size analysis |
 | `docs/reproducibility.md` | How every reported number traces to a config/seed/MLflow run |
 | `Review_1_Privacy_Preserving_FL_Diagnosis.pptx` | Original project proposal (do not modify) |
 

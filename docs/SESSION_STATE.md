@@ -1581,3 +1581,37 @@ results.md and docs/calibration.md) — DP appears to destabilize WHERE the
 model's explanation attributes its decision, across seeds, independent of
 whether it destabilizes accuracy. 177/177 tests passing (165 + 12 new). No
 new dependency, no architecture change.
+
+**OPT-4 — Conformal prediction: complete.** Scoped conditionally on OPT-1's
+own finding, per this session's own Phase 6 recommendation ("do OPT-1
+first, and let its result decide whether OPT-4 is worth doing at all") —
+OPT-1 found DP damages MC Dropout's raw ECE calibration ~4x, which is
+exactly the condition that makes conformal prediction (a method whose
+coverage guarantee does NOT depend on calibration quality) worth building.
+`src/uncertainty/conformal.py` (split conformal, LAC non-conformity score,
+Sadinle et al. 2019, finite-sample-corrected quantile, alpha=0.10 matching
+DG-10's 90% target coverage), `tests/test_conformal.py` (8 tests including
+a large-N synthetic-data check that the coverage guarantee genuinely holds
+against a deliberately overconfident/miscalibrated synthetic model — the
+property that actually matters, not just shape checks),
+`scripts/run_conformal_analysis.py` (calibrates on the pooled natural VAL
+set, evaluates on the pooled natural TEST set, same 7-config x 3-seed
+checkpoint set as OPT-1-3), 1 figure, `docs/conformal.md`.
+
+**Real result: the coverage guarantee holds cleanly everywhere** (0.898-
+0.914 empirical coverage against a 0.90 target, every configuration
+including the full DP sweep) — direct validation that conformal prediction
+survives exactly the calibration damage OPT-1 measured, a genuine
+load-bearing positive result for the clinical-trust story. **The set-size
+finding did NOT match the going-in hypothesis and is reported as observed,
+not adjusted to fit it**: mean prediction-set size is dominated by
+FEDERATION itself (centralized: 1.18, tight/confident; every federated
+config: 1.35-1.46, ~35-46% ambiguous "both classes" sets) — DP does not
+clearly add hedging cost on top of what federation alone already costs,
+and if anything the DP configurations' mean set sizes are slightly
+*smaller* than plain no-DP FedAvg's, with no clean epsilon trend. This
+traces to federation's own ~9-AUROC-point accuracy gap vs. centralized
+(docs/results.md), not to DP specifically. 185/185 tests passing (177 + 8
+new). No new dependency (hand-implemented split conformal, not a new
+library like MAPIE — kept the dependency-approval process out of the
+critical path), no architecture change.
