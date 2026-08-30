@@ -419,6 +419,14 @@ must be independently switchable for the ablation study.
   the images are, so no image ever needs to move for explanation.
 - **Note:** if the ADR-1 GroupNorm fallback is ever adopted, the Grad-CAM target layer name
   changes and must be updated.
+- **Implementation note (Stage 18, verified empirically):** `pytorch-grad-cam`'s plain `GradCAM`
+  does not itself mark its input tensor `requires_grad=True` (its `compute_input_gradient` flag
+  defaults to `False`) — for an ordinarily fully-trainable model this is invisible, since some
+  upstream parameter already requires grad, but with ADR-1's entirely-frozen backbone nothing
+  in the forward pass would require grad at all, so no gradient graph gets built and the target
+  layer's backward hook never fires. `src/explain/gradcam.py` explicitly marks the input tensor
+  `requires_grad_(True)` before calling into the library to compensate. Found via this stage's
+  own first live test run (a hard crash, not a silently-wrong heatmap), not by inspection.
 
 Qualitative heatmaps alone are illustrative, not a result. Quantitative Grad-CAM evaluation is a
 **pending optional direction** (§16.1), not part of the approved baseline scope.
@@ -567,9 +575,9 @@ touch them.
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), and all of Phase 3 (Stages 13–17) complete — FedAvg verified working end-to-end (real 20-round run), Differential Privacy (Opacus DP-SGD, sample-level, RDP accountant) verified via two real live runs at target-epsilon 4 and 1, Secure Aggregation (Flower SecAgg+, ADR-3) verified via a real live run with updates actually masked, TLS + client authentication (ADR-4) verified end-to-end in deployment mode, and Docker Compose deployment (Stage 17) verified via a real multi-container run — 4 separate containers, real TLS, real client auth, real per-hospital data isolation, 3 full federated rounds, using the canonical Stage 13/14/16 app unmodified (confirms ADR-8 in the strongest form yet). Phase 4 (Grad-CAM, MC Dropout) not yet started. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
+| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), all of Phase 3 (Stages 13–17), and Phase 4's Stage 18 complete — FedAvg, Differential Privacy, Secure Aggregation, TLS/client authentication and Docker Compose deployment all verified live end-to-end (see prior entries in git history); Grad-CAM explainability (ADR-1 compatible, verified with a real trained checkpoint) now produces real, non-degenerate, class-discriminative heatmaps over real chest X-rays, batch-generated across TP/FP/TN/FN cases and logged to MLflow. Stage 19 (MC Dropout) not yet started. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
 | Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`. |
-| Tests | 119 passing |
+| Tests | 125 passing |
 
 ### Resolved decisions
 
