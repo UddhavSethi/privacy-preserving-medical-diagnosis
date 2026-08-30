@@ -1,0 +1,20 @@
+# OPT-5 — Isolation Forest OOD detection gate (CLAUDE.md section 16.1a).
+# Documentation mirror of src/uncertainty/ood_detector.py's own defaults —
+# nothing currently loads this file via Hydra, matching this project's
+# convention for infra/reporting-style stages (e.g. Stage 16's
+# conf/federated/tls.yaml, Stage 19's conf/experiment/uncertainty.yaml).
+
+ood_detector:
+  n_estimators: 100 # Isolation Forest trees, sklearn's own default — not tuned.
+  detector_seed: 42 # one fixed canonical detector per hospital, not swept over
+    # the project's usual {42,123,2024} seed set — this is a deployed safety
+    # gate artifact, not an ablation-table row.
+  target_flag_fraction: 0.05 # fixed-coverage-target design, mirroring DG-10's
+    # deferral threshold (src/uncertainty/deferral.py) — NOT an owner-approved
+    # clinical policy decision like DG-10's 10% rate. A placeholder requiring
+    # the same explicit sign-off before real deployment (see
+    # src/uncertainty/ood_detector.py's module docstring and
+    # docs/ood_detection.md).
+  features: both_classes # trained on the full in-distribution training feature
+    # set, Normal and Pneumonia alike — Normal-only would make this partially
+    # redundant with the classifier itself.

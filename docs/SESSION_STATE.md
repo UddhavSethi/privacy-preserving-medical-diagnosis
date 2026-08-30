@@ -1615,3 +1615,49 @@ traces to federation's own ~9-AUROC-point accuracy gap vs. centralized
 new). No new dependency (hand-implemented split conformal, not a new
 library like MAPIE — kept the dependency-approval process out of the
 critical path), no architecture change.
+
+**OPT-5 — Isolation Forest OOD detection gate: complete.** Concept-approved
+2026-08-29 (CLAUDE.md §16.1a), implemented 2026-08-30 as the last item in
+the owner's "implement everything till opt 5" grant.
+`src/uncertainty/ood_detector.py` (one IsolationForest per hospital, both
+classes, DG-10-style fixed-coverage-target threshold calibration — module
+docstring restates and reaffirms why this must never touch SecAgg/FedAvg,
+the interpretation already rejected when this was concept-approved),
+`tests/test_ood_detector.py` (8 tests: genuine outlier separation on
+synthetic clustered data, calibration target achieved exactly, determinism
+given seed), `scripts/build_ood_detector.py` (real per-hospital detectors
+on real cached training features, validated against real held-out val/test
+data AND synthetic OOD images run through the REAL frozen backbone — no
+external natural-image dataset available in this project, so random noise
++ a structured synthetic pattern stand in, explicitly labeled as
+surrogates, not claimed as real photos), 1 figure,
+`docs/ood_detection.md`, `conf/experiment/ood.yaml` (documentation
+mirror, matching Stage 19's `conf/experiment/uncertainty.yaml` convention
+— not the plan's originally-guessed `conf/uncertainty/ood.yaml` path,
+since no `conf/uncertainty/` directory exists in this project's actual
+structure).
+
+**Real result — clean and strong:** every hospital's independent test-set
+flag rate (4.6-6.5%) tracks its 5% calibration target closely, and EVERY
+synthetic OOD image (both random noise and structured patterns, 100 each,
+3 hospitals) was flagged: 100.0% across the board vs. ~5% on real chest
+X-rays — total, not marginal, separation. Hospital A (smallest training
+set, 4,180 vs. B/C's ~9,300) shows a small, explainable ~1-point elevation
+above target, reported honestly per the plan's own named risk rather than
+smoothed over. Explicitly named as a real limitation, not overclaimed: the
+synthetic OOD images are structurally alien (random noise, colored shapes)
+— a relatively easy bar; a harder, more clinically realistic test (a
+different chest X-ray dataset, or a mislabeled non-thorax radiograph) was
+not attempted. 193/193 tests passing (185 + 8 new). No new dependency
+(scikit-learn already pinned), no architecture change, zero interaction
+with the federated/SecAgg path (verified by construction — this module
+never imports anything from `src/federated/`).
+
+**Phase 6 status: OPT-1 through OPT-5 all complete**, exhausting the
+owner's 2026-08-30 "follow the order and implement everything till opt 5"
+grant. OPT-6 (Streamlit demo) is explicitly NOT started — the owner said
+"we will discuss streamlit deployement after that," meaning a fresh
+check-in is needed before any OPT-6 work begins, not an assumption of
+continued autonomy. All five completed extensions are committed and
+pushed to `origin/main` (commits `6f679b4`, `ce06be6`, `dcf0943`,
+`9514ba3`, and OPT-5's own commit immediately following this note).
