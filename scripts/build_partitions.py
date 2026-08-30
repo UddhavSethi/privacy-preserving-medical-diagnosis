@@ -41,6 +41,17 @@ DIRICHLET_SEED = 2000
 DIRICHLET_NUM_CLIENTS = 5
 DIRICHLET_ALPHAS = [0.1, 0.5, 1.0, 10.0]
 
+# Stage 21 (owner-approved 2026-08-30): the actual trainable Dirichlet ablation
+# partitions, distinct from build_dirichlet_sweep()'s demonstration-only summary
+# above (which never persisted per-client records, only aggregate stats, and used
+# different parameters). num_clients=3 for direct comparability with the natural/
+# balanced regimes' client count; alpha in {0.1, 1.0} = strong vs. mild synthetic
+# heterogeneity, a secondary/supplementary result per CLAUDE.md's own framing that
+# natural non-IID is preferred.
+DIRICHLET_ABLATION_SEED = 2100  # deliberately different from DIRICHLET_SEED above
+DIRICHLET_ABLATION_NUM_CLIENTS = 3
+DIRICHLET_ABLATION_ALPHAS = [0.1, 1.0]
+
 
 def _load_source_records(source: str) -> list[dict]:
     data = json.loads((PARTITIONS_DIR / f"{source}_splits.json").read_text())
@@ -131,10 +142,59 @@ def build_dirichlet_sweep() -> None:
     print(f"written: {out_path}\n")
 
 
+def build_dirichlet_ablation_partitions() -> None:
+    """Stage 21's actual trainable Dirichlet partitions (see the module-level
+    constants' comment for why this is separate from build_dirichlet_sweep()).
+    Writes one full hospitals_dirichlet_alpha<alpha>.json per alpha, in the same
+    {"hospitals": {...}} format as hospitals_natural.json, usable directly by
+    load_hospital_features (which as of Stage 21 supports multi-source hospitals —
+    Dirichlet pools both Kermany and RSNA before assigning patients to clients, so
+    a given synthetic client can and often does span both sources).
+
+    Client keys are remapped from dirichlet_partition()'s own "client-0"/"client-1"/
+    "client-2" to "A"/"B"/"C" — `src/federated/client_app.py`'s
+    `PARTITION_TO_HOSPITAL = {0: "A", 1: "B", 2: "C"}` is hardcoded to those names
+    (matching every other partition file), and changing that well-tested mapping to
+    accommodate one partition scheme was judged riskier than renaming keys here.
+    """
+    pooled = _load_source_records("kermany") + _load_source_records("rsna")
+    client_names = ["A", "B", "C"]
+
+    for alpha in DIRICHLET_ABLATION_ALPHAS:
+        raw = dirichlet_partition(
+            pooled,
+            num_clients=DIRICHLET_ABLATION_NUM_CLIENTS,
+            alpha=alpha,
+            seed=DIRICHLET_ABLATION_SEED,
+        )
+        hospitals = dict(zip(client_names, raw.values(), strict=True))
+        assert_no_patient_overlap_across_hospitals(hospitals)
+
+        out = {
+            "scheme": "dirichlet",
+            "note": (
+                f"Stage 21 synthetic non-IID ablation partition, alpha={alpha}, "
+                f"{DIRICHLET_ABLATION_NUM_CLIENTS} clients, pooling both sources. "
+                "Secondary/supplementary to the natural regime per CLAUDE.md's own "
+                "framing (natural non-IID is preferred, this is 'a controlled sweep')."
+            ),
+            "alpha": alpha,
+            "num_clients": DIRICHLET_ABLATION_NUM_CLIENTS,
+            "seed": DIRICHLET_ABLATION_SEED,
+            "summary": per_client_stats(hospitals),
+            "hospitals": hospitals,
+        }
+        out_path = PARTITIONS_DIR / f"hospitals_dirichlet_alpha{alpha}.json"
+        out_path.write_text(json.dumps(out, indent=2))
+        print(f"dirichlet alpha={alpha}:", json.dumps(out["summary"], indent=2))
+        print(f"written: {out_path}\n")
+
+
 def main() -> None:
     natural_hospitals = build_natural()
     build_natural_balanced(natural_hospitals)
     build_dirichlet_sweep()
+    build_dirichlet_ablation_partitions()
 
 
 if __name__ == "__main__":

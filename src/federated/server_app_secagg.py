@@ -35,8 +35,10 @@ overflow" warning in the weight-quantization math every round.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 
+import mlflow
 import torch
 import torch.nn.functional as F
 from flwr.common import Context, ndarrays_to_parameters
@@ -81,47 +83,75 @@ def main(grid: Grid, context: Context) -> None:
     reconstruction_threshold = int(context.run_config["reconstruction-threshold"])
     seed = int(context.run_config["seed"])
 
-    torch.manual_seed(seed)
-    global_model = DenseNet121Head()
-    reference_keys = list(global_model.classifier.state_dict().keys())
-    initial_ndarrays = [v.detach().cpu().numpy() for v in global_model.classifier.state_dict().values()]
-    parameters = ndarrays_to_parameters(initial_ndarrays)
+    mlflow_uri = context.run_config.get("mlflow-tracking-uri")
+    if mlflow_uri:
+        mlflow.set_tracking_uri(str(mlflow_uri))
+        mlflow.set_experiment(str(context.run_config.get("mlflow-experiment-name", "federated")))
+        run_cm = mlflow.start_run(run_name=f"secagg_seed{seed}")
+    else:
+        run_cm = nullcontext()
 
-    strategy = LegacyFedAvg(
-        fraction_fit=1.0,
-        fraction_evaluate=float(context.run_config["fraction-evaluate"]),
-        min_fit_clients=len(HOSPITALS),
-        min_evaluate_clients=len(HOSPITALS),
-        min_available_clients=len(HOSPITALS),
-        initial_parameters=parameters,
-        evaluate_fn=_make_legacy_evaluate_fn(
-            context.run_config["partition-path"], context.run_config["feature-cache-dir"], reference_keys
-        ),
-    )
+    with run_cm:
+        if mlflow_uri:
+            mlflow.log_params(
+                {
+                    "num_server_rounds": num_rounds,
+                    "num_shares": num_shares,
+                    "reconstruction_threshold": reconstruction_threshold,
+                    "seed": seed,
+                    "secagg_enabled": True,
+                }
+            )
 
-    legacy_context = LegacyContext(
-        context=context,
-        config=ServerConfig(num_rounds=num_rounds),
-        strategy=strategy,
-    )
+        torch.manual_seed(seed)
+        global_model = DenseNet121Head()
+        reference_keys = list(global_model.classifier.state_dict().keys())
+        initial_ndarrays = [v.detach().cpu().numpy() for v in global_model.classifier.state_dict().values()]
+        parameters = ndarrays_to_parameters(initial_ndarrays)
 
-    fit_workflow = SecAggPlusWorkflow(
-        num_shares=num_shares,
-        reconstruction_threshold=reconstruction_threshold,
-        max_weight=float(context.run_config["max-weight"]),
-    )
-    workflow = DefaultWorkflow(fit_workflow=fit_workflow)
-    workflow(grid, legacy_context)
+        strategy = LegacyFedAvg(
+            fraction_fit=1.0,
+            fraction_evaluate=float(context.run_config["fraction-evaluate"]),
+            min_fit_clients=len(HOSPITALS),
+            min_evaluate_clients=len(HOSPITALS),
+            min_available_clients=len(HOSPITALS),
+            initial_parameters=parameters,
+            evaluate_fn=_make_legacy_evaluate_fn(
+                context.run_config["partition-path"], context.run_config["feature-cache-dir"], reference_keys
+            ),
+        )
 
-    print("\n=== Run history (SecAgg+, ablation row 4) ===")
-    print(legacy_context.history)
+        legacy_context = LegacyContext(
+            context=context,
+            config=ServerConfig(num_rounds=num_rounds),
+            strategy=strategy,
+        )
 
-    final_ndarrays = legacy_context.state.array_records[MAIN_PARAMS_RECORD].to_numpy_ndarrays()
-    final_state = {k: torch.tensor(arr) for k, arr in zip(reference_keys, final_ndarrays, strict=True)}
+        fit_workflow = SecAggPlusWorkflow(
+            num_shares=num_shares,
+            reconstruction_threshold=reconstruction_threshold,
+            max_weight=float(context.run_config["max-weight"]),
+        )
+        workflow = DefaultWorkflow(fit_workflow=fit_workflow)
+        workflow(grid, legacy_context)
 
-    out_path = Path(
-        context.run_config.get("output-checkpoint", "outputs/checkpoints/federated/secagg_final.pt")
-    )
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(final_state, out_path)
-    print(f"\nFinal global classifier saved: {out_path}")
+        print("\n=== Run history (SecAgg+, ablation row 4) ===")
+        print(legacy_context.history)
+
+        if mlflow_uri:
+            for round_num, value in legacy_context.history.metrics_centralized.get("pooled_test_auroc", []):
+                if round_num > 0:
+                    mlflow.log_metric("pooled_test_auroc", value, step=round_num)
+            final_metrics = legacy_context.history.metrics_centralized.get("pooled_test_auroc", [])
+            if final_metrics:
+                mlflow.log_metric("final_pooled_test_auroc", final_metrics[-1][1])
+
+        final_ndarrays = legacy_context.state.array_records[MAIN_PARAMS_RECORD].to_numpy_ndarrays()
+        final_state = {k: torch.tensor(arr) for k, arr in zip(reference_keys, final_ndarrays, strict=True)}
+
+        out_path = Path(
+            context.run_config.get("output-checkpoint", "outputs/checkpoints/federated/secagg_final.pt")
+        )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(final_state, out_path)
+        print(f"\nFinal global classifier saved: {out_path}")

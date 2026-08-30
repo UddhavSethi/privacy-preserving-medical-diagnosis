@@ -207,3 +207,46 @@ def test_load_pooled_features_concatenates_hospitals(tmp_path):
     assert pooled.train_features.shape[0] == 5  # 2 + 3
     assert pooled.val_features.shape[0] == 2  # 1 + 1
     assert pooled.test_features.shape[0] == 2  # 1 + 1
+
+
+def test_load_hospital_features_supports_multi_source_hospital(tmp_path):
+    """Stage 21: Dirichlet-partitioned synthetic clients pool both Kermany and RSNA
+    before assigning patients to clients, so a single "hospital" can span both
+    sources — the real bug this test guards against: an earlier version of
+    load_hospital_features assumed every record shared hospital_records[0]["source"],
+    which would silently drop every record from whichever source wasn't first."""
+    feature_cache_dir = tmp_path / "feature_cache"
+    partition = {
+        "hospitals": {
+            "D": [
+                {"source": "kermany", "patient_id": "k1", "label": "Normal", "frozen_split": "train"},
+                {"source": "kermany", "patient_id": "k2", "label": "Normal", "frozen_split": "train"},
+                {"source": "rsna", "patient_id": "r1", "label": "Pneumonia", "frozen_split": "train"},
+                {"source": "rsna", "patient_id": "r2", "label": "Pneumonia", "frozen_split": "train"},
+                {"source": "rsna", "patient_id": "r3", "label": "Pneumonia", "frozen_split": "train"},
+                {"source": "kermany", "patient_id": "k3", "label": "Normal", "frozen_split": "val"},
+                {"source": "rsna", "patient_id": "r4", "label": "Pneumonia", "frozen_split": "test"},
+            ]
+        }
+    }
+    for source, split, pids in [
+        ("kermany", "train", ["k1", "k2"]),
+        ("rsna", "train", ["r1", "r2", "r3"]),
+        ("kermany", "val", ["k3"]),
+        ("rsna", "val", []),
+        ("kermany", "test", []),
+        ("rsna", "test", ["r4"]),
+    ]:
+        num_views = FEATURE_KEY.num_augmented_views + 1 if split == "train" else 1
+        features = torch.randn(len(pids), num_views, 1024)
+        labels = [0] * len(pids)
+        bank_path = cache_file_path(feature_cache_dir, source, split, FEATURE_KEY)
+        save_feature_bank(bank_path, features, pids, labels)
+
+    partition_path = tmp_path / "partition.json"
+    partition_path.write_text(json.dumps(partition))
+
+    hf = load_hospital_features(partition_path, "D", feature_cache_dir=feature_cache_dir)
+    assert hf.train_features.shape[0] == 5  # 2 kermany + 3 rsna, neither silently dropped
+    assert hf.val_features.shape[0] == 1  # kermany only
+    assert hf.test_features.shape[0] == 1  # rsna only

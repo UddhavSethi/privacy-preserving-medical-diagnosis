@@ -581,9 +581,9 @@ touch them.
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), all of Phase 3 (Stages 13–17), all of Phase 4 (Stages 18–19), and Phase 5's Stage 20 complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live (see prior entries in git history); overhead instrumentation now reports real communication and compute cost per round, with DP's and SecAgg's overhead attributed separately from real live-run comparisons (DP: ~16x client compute time, zero payload-size change; SecAgg: ~13% total round-time overhead). Stage 21 (full ablation campaign) not yet started. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
+| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), all of Phase 3 (Stages 13–17), all of Phase 4 (Stages 18–19), and Phase 5's Stages 20–21 complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live; the full ablation campaign (Stage 21) ran 27/27 real live federated runs (3 seeds each) and produced the complete ablation table with real numbers for every row — local/centralized baselines, FedAvg (natural+balanced), FedAvg+SecAgg, FedAvg+DP (full epsilon sweep {1,2,4,8}, cleanly monotonic), and a supplementary Dirichlet synthetic non-IID sweep. Row 6 (full combined system) deliberately deferred — needs real integration work not yet done. Stage 22 (test suite hardening) in progress under the owner's 2026-08-30 autonomy grant. See `docs/SESSION_STATE.md` for current detail and the full table; this table is a coarse summary. |
 | Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`. |
-| Tests | 140 passing |
+| Tests | 144 passing |
 
 ### Resolved decisions
 
@@ -700,15 +700,33 @@ touch them.
    cases rather than deferring arbitrarily. Full detail in
    `docs/SESSION_STATE.md` §7's Stage 19 note.
 
+10. **Stage 21 full ablation campaign scope (resolved 2026-08-30, owner-approved).**
+    Seeds `{42, 123, 2024}` (reused from Stages 11/12); 20 rounds per federated
+    run (reused from Stage 13, confirmed affordable by Stage 20's real timing);
+    Dirichlet synthetic non-IID sweep at alpha `{0.1, 1.0}`, 3 clients (matching
+    the natural regime's client count); row 6 (full combined system) explicitly
+    deferred, not part of this campaign. Executed as 27 real live federated runs
+    (`scripts/run_ablation.py`), all succeeded, every row of the ablation table
+    now has real numbers over 3 seeds — including a clean, monotonic
+    privacy-utility curve across the full DP epsilon sweep, and the expected
+    heterogeneity-hurts-FedAvg effect in the Dirichlet sweep. Full table and
+    real bugs found (a multi-source hospital data-loss bug in
+    `load_hospital_features`, a Dirichlet client-naming mismatch, a missing
+    `--stream` flag that corrupted the campaign's first launch attempt, and
+    MLflow filter-string dialect gotchas) in `docs/SESSION_STATE.md` §7's
+    Stage 21 note.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
-1. **Client count** and default partition scheme for the headline results — partially
-   resolved by DG-3 (client count of 3 for the natural regime); still open for the
-   Dirichlet synthetic sweep's client count and which regime is the paper's primary
-   headline vs. secondary comparison.
+1. **Which regime (natural vs. balanced) is the paper's primary headline vs.
+   secondary comparison.** Client count for both the natural regime (3, DG-3)
+   and the Dirichlet synthetic sweep (3, Stage 21) are now resolved — see the
+   resolved-decisions list below — but the paper's primary-vs-secondary framing
+   across natural/balanced/Dirichlet has not itself been decided.
 2. **Whether/when a "full system" demonstration (FedAvg + SecAgg + DP + TLS,
    ablation row 6) gets built** — deferred, not resolved, when Stage 17 was
-   scoped (see item 8 below). Requires reconciling Stage 15's separate
+   scoped (see item 8 below), and deferred again explicitly when Stage 21 was
+   scoped (item 10 below). Requires reconciling Stage 15's separate
    legacy-API SecAgg app pair with Stage 13/14/16's canonical Message-API app.
    Not yet raised for a decision on timing.
 

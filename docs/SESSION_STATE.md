@@ -173,7 +173,8 @@ re-asserted by a dedicated test against the live files).
 | 18 — Grad-CAM explainability | **Done — real, non-degenerate, class-discriminative heatmaps on real trained checkpoints and real chest X-rays.** A real ADR-1/Grad-CAM interaction the plan itself flagged as needing empirical verification turned out to be a real bug (crash, not silent wrong output) on the first live test run — see note below the table. `src/explain/gradcam.py`, `scripts/generate_explanations.py`. 125/125 tests passing (6 new). | 9fcc8af |
 | 19 — Monte Carlo Dropout and deferral | **Done — DG-10 resolved (fixed coverage target, defer worst 10%), verified on the real pooled test set: retained-case accuracy exceeds overall accuracy.** No implementation bugs this time (all 9 new tests passed on first run) — a clean stage after Grad-CAM's real bug. `src/uncertainty/{mc_dropout,deferral}.py`, `conf/experiment/uncertainty.yaml`. 134/134 tests passing (9 new). | (pending commit this session) |
 | 20 — Overhead instrumentation | **Done — real per-round communication and compute cost, DP's and SecAgg's overhead attributed separately from real live-run comparisons.** `src/evaluation/overhead.py`, small additive instrumentation in `client_app.py`/`client_app_secagg.py`. 140/140 tests passing (6 new). See note below the table. | (pending commit this session) |
-| 21–23 | Not started — Phase 4 (Stages 18-19) is now complete | — |
+| 21 — Full ablation campaign | **Done — 27/27 real live runs succeeded, every row of the ablation table has real numbers, 3 seeds each.** Epsilon sweep shows a clean monotonic privacy-utility tradeoff; Dirichlet sweep shows the expected heterogeneity-hurts-FedAvg effect. Real bugs found and fixed along the way — see note below the table. 144/144 tests passing (3 new). | (pending commit this session) |
+| 22–23 | Not started | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -1010,6 +1011,132 @@ payload size scaling with parameter count, wall-clock genuinely measuring a
 real delay (not returning zero), and peak memory reflecting a real
 allocation difference.
 
+**Stage 21 (`scripts/run_ablation.py`, `scripts/build_partitions.py`'s
+Dirichlet-ablation additions, `src/evaluation/tables.py`,
+`src/federated/server_app.py`/`server_app_secagg.py`'s MLflow instrumentation,
+`src/training/trainer.py`'s multi-source hospital fix,
+`conf/experiment/ablation.yaml`) — the full ablation campaign, CLAUDE.md
+§11.1's "the ablation table is the paper." The largest single stage this
+session: 27 real live federated runs, every row of the table with real
+numbers over 3 seeds, executed under the owner's explicit "use whatever
+decisions you want, I'm stepping away" autonomy grant (2026-08-30) covering
+Stages 21-23.**
+
+**Four scoping decisions applied, all owner-approved 2026-08-30** (raised
+explicitly before starting, per CLAUDE.md's "this stage genuinely cannot be
+scoped without owner input" — unlike most implementation-detail decisions
+this session): seeds `{42, 123, 2024}` (reused from Stages 11/12); 20 rounds
+per federated run (reused from Stage 13, confirmed affordable by Stage 20's
+real timing even for the DP rows); Dirichlet synthetic non-IID sweep at
+alpha `{0.1, 1.0}`, 3 clients (matching the natural regime's client count);
+row 6 (full combined system: FedAvg+SecAgg+DP+TLS) explicitly deferred, not
+part of this campaign, since it needs real integration work (reconciling
+Stage 15's legacy-API SecAgg app with the canonical Message-API app) that
+hasn't been done.
+
+**Three real bugs found and fixed before the campaign could produce valid
+data, plus one during the campaign's actual first launch attempt — every one
+found empirically, none by inspection:**
+
+1. **Multi-source hospital data loss (found while building the Dirichlet
+   partitions, before any run).** Dirichlet partitioning pools both Kermany
+   and RSNA before assigning patients to synthetic clients, so a single
+   "hospital" can span both sources — but `load_hospital_features`
+   (used by every training/evaluation path since Stage 11) assumed
+   `hospital_records[0]["source"]` applied to every record, which would have
+   silently dropped every record from whichever source wasn't first for any
+   mixed-source client. Fixed by grouping per `(source, split)` and
+   concatenating across sources for the same split — a strict
+   generalization, verified to change nothing for the existing single-source
+   natural/balanced hospitals (all 144 tests, including every prior stage's,
+   still pass) and covered by a new dedicated test
+   (`test_load_hospital_features_supports_multi_source_hospital`) plus a
+   real-data spot-check against the actual generated Dirichlet partitions
+   before trusting them for the campaign.
+2. **Dirichlet client-naming mismatch.** `dirichlet_partition()`'s own
+   client keys ("client-0"/"client-1"/"client-2") don't match
+   `client_app.py`'s hardcoded `PARTITION_TO_HOSPITAL = {0: "A", 1: "B", 2: "C"}`
+   — fixed by remapping keys to "A"/"B"/"C" when writing the ablation
+   partition files (`scripts/build_partitions.py`), rather than touching the
+   well-tested, heavily-relied-on `client_app.py`.
+3. **No MLflow tracking for any federated run, ever, before this stage** —
+   a real gap against CLAUDE.md §12's "a result that is not in MLflow does
+   not exist," silently true for every one of Stages 13-20's real live runs.
+   Fixed by adding optional (`nullcontext` if unset) MLflow logging to both
+   `server_app.py` and `server_app_secagg.py`, activated via a new
+   `mlflow-tracking-uri` config key (must be an ABSOLUTE sqlite path — the
+   same isolated-FAB-execution-directory gotcha Stage 13 first found for
+   `partition-path`/`feature-cache-dir` applies here too). Verified with a
+   real smoke-test run before trusting it for the actual campaign.
+4. **The campaign's first real launch corrupted itself within seconds** —
+   `scripts/run_ablation.py`'s `_run_flwr()` called `flwr run` without
+   `--stream`, and *without* `--stream`, `flwr run` submits the run and
+   returns immediately rather than blocking until it finishes (every prior
+   stage's own live validation runs always used `--stream`, which is why
+   this was never hit before). All 27 runs were submitted to the same
+   persistent SuperLink within seconds of each other instead of one at a
+   time, corrupting the whole campaign — caught almost immediately by
+   noticing multiple simultaneous "RUNNING" MLflow entries and near-identical
+   log-file timestamps, not by waiting for it to visibly fail. Killed the
+   process, deleted the corrupted MLflow runs and stale SuperLink state,
+   fixed the missing `--stream` flag, validated the fix with a single real
+   run confirmed to actually block, then relaunched clean.
+
+**A fifth, smaller finding while writing `src/evaluation/tables.py`**:
+MLflow's sqlite-backed `search_runs` filter-string parser rejects both
+parenthesized boolean grouping (`(a and b)`) and `LIKE ... ESCAPE`, neither
+of which is obvious from the client API's type signature. Also, a naive
+run-name substring match for row 3 (FedAvg) would have silently pulled in
+row 5's DP runs too, since `"fedavg_natural_seed42"` is a literal prefix of
+`"fedavg_natural_seed42_dp_eps1.0"`. Fixed by using flat `and`-joined filter
+clauses (no parens) and filtering on the `partition_path`/`dp_enabled`
+**params** already logged per run instead of pattern-matching run *names* —
+more robust, and sidesteps both issues at once.
+
+**The complete real ablation table — every row, 3 seeds, from live data,
+not estimates:**
+
+| Row | Mean AUROC | Std |
+|---|---|---|
+| 1. Local, natural (avg. across hospitals) | 0.8924 | 0.0005 |
+| 1. Local, balanced | 0.8853 | 0.0010 |
+| 2. Centralized, natural (pooled) | 0.9053 | 0.0006 |
+| 2. Centralized, balanced | 0.9290 | 0.0010 |
+| 3. FedAvg, natural | 0.8144 | 0.0095 |
+| 3. FedAvg, balanced | 0.8387 | 0.0273 |
+| 4. FedAvg + SecAgg | 0.8194 | 0.0200 |
+| 5. FedAvg + DP, epsilon=1.0 | 0.7909 | 0.0147 |
+| 5. FedAvg + DP, epsilon=2.0 | 0.8021 | 0.0122 |
+| 5. FedAvg + DP, epsilon=4.0 | 0.8085 | 0.0097 |
+| 5. FedAvg + DP, epsilon=8.0 | 0.8133 | 0.0080 |
+| Dirichlet (supplementary), alpha=0.1 | 0.7764 | 0.0117 |
+| Dirichlet (supplementary), alpha=1.0 | 0.8948 | 0.0023 |
+
+**Every expected qualitative pattern shows up cleanly in real data, not just
+in theory:** the DP epsilon sweep is **monotonically increasing** in
+epsilon (looser privacy budget → higher accuracy) across all four values,
+exactly the textbook privacy-utility tradeoff, now measured rather than
+assumed. SecAgg (0.8194) sits close to plain FedAvg-natural (0.8144),
+consistent with ADR-3's expectation that secure aggregation costs
+communication/compute, not accuracy. The Dirichlet sweep shows the expected
+heterogeneity effect in the other direction from what alpha's magnitude
+might naively suggest at first glance — **alpha=0.1 (strong synthetic skew)
+scores lower (0.7764) than alpha=1.0 (mild skew, 0.8948)**, i.e. more
+non-IID heterogeneity hurts FedAvg more, the standard finding in the
+Dirichlet-partitioning literature this project's own docstring cites (Hsu,
+Qi & Brown 2019). Balanced-regime FedAvg (0.8387) exceeds natural-regime
+FedAvg (0.8144), plausibly reflecting the natural regime's larger client-size
+imbalance (Hospital A << B/C) diluting Hospital A's easier, cleaner Kermany
+signal in the federated average more than the balanced regime does.
+
+3 new tests (144 total): `tests/test_tables.py` (baseline-row loaders,
+deterministic against real Stage 11/12 saved JSON) and
+`tests/test_trainer.py`'s new multi-source hospital test (bug #1 above).
+The MLflow-query functions themselves were validated against real campaign
+data as it ran rather than against a mocked backend, which would only test
+the mock's behavior, not MLflow's actual filter-string dialect (finding #5
+above was only discoverable this way).
+
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
 (Isolation Forest OOD detection gate, scoped to chest-X-ray anomaly detection only, not
@@ -1099,24 +1226,29 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. Stage 20 is about to be committed on top of `f6256a2`
-(Stage 19) — `src/evaluation/overhead.py` (new), `tests/test_overhead.py`
-(new), `src/federated/client_app.py`/`client_app_secagg.py` (small additive
-instrumentation), plus this file's update. `pyproject.toml`'s
-`[tool.flwr.app.components]` was temporarily swapped to the SecAgg app pair
-for the live overhead-comparison run and **confirmed reverted** (`git diff
-pyproject.toml` showed no output before this commit — the swap-and-revert
-Stage 15 established). No changes to `pyproject.toml`'s config/`uv.lock`
-otherwise — no new dependencies. Check `git log --oneline -5` on resume —
-this file is not re-updated after every single commit within a session,
-only at natural pause points.
+**Branch:** `main`. Stage 21 is about to be committed on top of `d55697f`
+(Stage 20) — `scripts/run_ablation.py` (new), `scripts/build_partitions.py`
+(Dirichlet-ablation additions), `src/evaluation/tables.py` (new),
+`src/federated/server_app.py`/`server_app_secagg.py` (MLflow instrumentation),
+`src/training/trainer.py` (multi-source hospital fix),
+`conf/experiment/ablation.yaml` (new), `tests/test_tables.py` (new),
+`tests/test_trainer.py` (new multi-source test), `pyproject.toml`
+(mlflow-tracking-uri config), `data/partitions/hospitals_dirichlet_alpha{0.1,1.0}.json`
+(new — confirmed trackable, not gitignored: `.gitignore` allowlists
+`data/partitions/*.json` the same way it does for `hospitals_natural.json`),
+plus this file's update. `pyproject.toml`'s `[tool.flwr.app.components]` was
+temporarily swapped to the SecAgg app pair for Row 4's 3 runs and
+**confirmed reverted** (`git diff pyproject.toml` shows only the legitimate
+mlflow-config addition). No new dependencies. Check `git log --oneline -5`
+on resume — this file is not re-updated after every single commit within a
+session, only at natural pause points.
 
 ```
+d55697f Stage 20: Overhead instrumentation — DP and SecAgg overhead attributed separately
 f6256a2 Stage 19: Monte Carlo Dropout and deferral (DG-10 resolved) — Phase 4 complete
 9fcc8af Stage 18: Grad-CAM explainability
 3ece93a Stage 17: Docker Compose multi-client deployment
 e078cee Stage 16: TLS + client authentication (ADR-4)
-20cc551 Stage 15: Secure Aggregation via Flower SecAgg+ (ablation row 4)
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -1126,59 +1258,58 @@ than a fresh explicit autonomy grant — treated as continued authorization by t
 session, but a **fresh session should not assume this transfers automatically**; if
 unsure, ask before pushing through a later phase boundary unprompted.
 
+**Explicit fresh grant, 2026-08-30, mid-Stage-21**: after raising Stage 21's four
+scoping decisions (seeds, round count, Dirichlet params, row 6 scope) and getting
+owner-approved answers to each, the owner then wrote *"i give you permissiobn to use
+whatver decsions you wanty for the next 3 stagees do them as i have to leave i will
+leave this running"* — a deliberate, explicit broad-autonomy grant covering Stages
+21, 22, and 23 specifically (not an open-ended standing grant beyond that scope), made
+right as they stepped away expecting long unattended background work. This is why
+Stage 21's campaign was launched and run to completion, and why Stages 22-23 (if this
+file shows them incomplete when you're reading it) were started without a fresh
+check-in. **This grant does not extend past Stage 23** — a fresh session resuming
+after Stage 23 is done should not assume continued blanket autonomy for whatever comes
+next (Phase 6's optional extensions, further campaign work, etc.) without asking.
+
 ## 11. Exact next recommended step
 
-**Stage 20 is complete — real per-round communication and compute cost, DP's
-and SecAgg's overhead attributed separately, exactly per CLAUDE.md §11.2's
-requirement.** Three real live 5-round comparison runs (baseline, DP-enabled,
-SecAgg-enabled), not estimates. See §7's Stage 20 note for the full numbers:
-DP costs ~16.7x client-side compute time but zero communication overhead
-(payload size bit-for-bit identical with or without DP-SGD); SecAgg costs
-~13% more total round time than plain FedAvg — comparatively modest at this
-project's 3-client, ~1MB-payload scale. Measured payload (1,053,900 bytes)
-matches the theoretical parameter-count size (1,051,656 bytes) within ~0.21%,
-Stage 20's own named testing criterion.
+**Stage 21 is complete — the full ablation campaign, 27/27 real live runs,
+every row of the table with real numbers over 3 seeds.** This is the
+paper's core deliverable, done. See §7's Stage 21 note for the complete
+table, the four real bugs found and fixed, and the clean qualitative
+patterns that showed up in real data (monotonic epsilon sweep, Dirichlet
+heterogeneity effect, SecAgg tracking plain FedAvg closely).
 
-**This closes out everything Stage 21 (the full ablation campaign) needs as
-a prerequisite**: per its own plan text, "Stages 11 through 17 and Stage
-20 — every layer must be verified individually before the campaign runs."
-Every one of those is now done, live-verified, with real numbers.
+**Executed under the owner's explicit 2026-08-30 autonomy grant covering
+Stages 21-23** (see §10's "Explicit fresh grant" note) — the owner answered
+Stage 21's four real scoping questions (seeds, round count, Dirichlet
+params, row 6 scope) directly, then granted broad autonomy for the
+remaining work as they stepped away. **Do not assume this grant extends
+past Stage 23.**
 
-Next is **Stage 21 — the full ablation campaign** (`REQ`, **`L`-sized**) —
-per CLAUDE.md §11.1, "the ablation table is the paper," this is the single
-largest remaining piece of work and where nearly all of the paper's actual
-reportable numbers come from. What it needs: `conf/experiment/ablation_*.yaml`
-(experiment configs for all six ablation rows), `scripts/run_ablation.py` (a
-batch runner across rows × seeds × epsilon values), `src/evaluation/tables.py`
-(aggregation into publication-ready tables/figures — needs `matplotlib`,
-already pinned). Concretely still missing before a real campaign run: ≥3
-seeds per configuration for every row that doesn't have them yet (Stage 13's
-FedAvg run and most of Stages 14-17's validation runs used only 1 seed each,
-by design, since they were mechanism-verification runs, not measurement
-runs); the remaining DP epsilon sweep values {2, 8} (only 1 and 4 have real
-numbers so far); and the Dirichlet synthetic non-IID partitioning regime,
-which this entire session has not touched at all (only the natural/balanced
-hospital partitions have been used, per DG-3).
+Next is **Stage 22 — test suite hardening** (`REQ`, **`M`-sized**) — per its
+own plan text, this is largely *consolidation*, not new implementation: most
+of CLAUDE.md §11.3's required tests already exist, written during their own
+stages (patient overlap — Stage 4; BGR→RGB, CLAHE determinism — Stage 6; DP
+clipping/noise/accounting — Stage 14; SecAgg mask cancellation — Stage 15;
+a federated smoke test — Stage 13). The job: confirm the full suite
+(currently 144 tests) genuinely runs green in one command from a clean
+state, check for any real gaps against §11.3's specific list, consider
+`tests/conftest.py` for shared fixtures, and optionally a CPU-only GitHub
+Actions workflow. The plan's own risk note is worth heeding: "tests written
+only at the end tend to codify existing bugs" — this session's tests were
+written stage-by-stage against real behavior already, which is the safer
+order; Stage 22 should audit and fill gaps, not retrofit assertions to
+match whatever the code currently does.
 
-**Real scoping questions Stage 21 will need the owner's input on, not
-something to assume silently**: exact seed set (CLAUDE.md §12 requires ≥3,
-Stage 11/12's precedent used {42, 123, 2024} — reuse those, or pick new
-ones?); how many rounds per configuration for the federated rows (Stage 13's
-real run used 20 rounds — is that the campaign's standard, or does DP/SecAgg
-warrant a different count given their much higher per-round cost just
-measured in Stage 20?); Dirichlet alpha value(s) and client count for the
-synthetic non-IID sweep (CLAUDE.md §14's own pending-decisions list already
-flags "client count for the Dirichlet synthetic sweep" as unresolved); and
-whether row 6 (the full combined system) is in scope for this campaign given
-Stage 17's finding that combining DP + SecAgg + TLS in one app requires real
-integration work first (reconciling Stage 15's legacy-API SecAgg app with
-the canonical Message-API app), which hasn't been done.
-
-Given Stage 21's real size (`L`, the plan's own largest-class label,
-compute-bound on a 4GB laptop per the plan's own risk section) and the
-multiple real scoping questions above — none of which have obvious defaults
-the way most of Stages 8-20's implementation-detail decisions did — **a
-check-in before starting Stage 21 is clearly warranted**, not just as the
-established per-phase-boundary pattern but because this stage genuinely
-cannot be fully scoped without the owner's input on seed count, round count,
-and Dirichlet parameters specifically.
+After that, **Stage 23 — documentation and reproducibility package**
+(`REQ`, **`M`-sized**) — a full README, threat model write-up (CLAUDE.md
+§6), limitations (§15), results documentation, an architecture diagram, and
+a *proposed* CLAUDE.md status update. **Important governance note for
+whoever picks this up**: Stage 23's own plan text says "Architecture
+change? Yes... Proposed for approval, not applied unilaterally" — CLAUDE.md
+itself requires propose→explain→show→ask→approve for any edit to itself,
+and the broad Stage 21-23 autonomy grant does not override that specific,
+explicit governance rule. Implement everything else in Stage 23 directly,
+but the CLAUDE.md diff itself must be shown to the owner and approved
+before being applied, not committed as part of autonomous work.
