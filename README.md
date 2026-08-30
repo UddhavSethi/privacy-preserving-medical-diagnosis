@@ -15,18 +15,37 @@ explanations and calibrated-confidence deferral to a clinician.
 
 ## Status
 
-**Phase 0 (Stages 0–2) complete — reproducibility spine in place. No modeling/FL code yet.**
+**Stages 0–23 complete.** Federated pipeline (FedAvg + Differential Privacy + Secure
+Aggregation + TLS/client auth), Grad-CAM explainability, Monte Carlo Dropout deferral, a
+Docker Compose multi-client deployment, a real full ablation campaign, and this
+documentation package are all implemented, tested, and validated against real live runs
+— not mocked. 145 tests passing.
 
 | Phase | Stages | Status |
 |---|---|---|
-| 0 — Foundation | 0, 1, 2 | **Done** — repo skeleton, pinned env (uv), Hydra config + seeding + MLflow tracking, all tests passing |
-| 1 — Data | 3–7 | Not started |
-| 2 — Model & baselines | 8–12 | Not started |
-| 3 — Federated core | 13–17 | Not started |
-| 4 — Clinical trust | 18, 19 | Not started |
-| 5 — Measurement & delivery | 20–23 | Not started |
+| 0 — Foundation | 0, 1, 2 | Done |
+| 1 — Data | 3–7 | Done |
+| 2 — Model & baselines | 8–12 | Done |
+| 3 — Federated core | 13–17 | Done |
+| 4 — Clinical trust | 18, 19 | Done |
+| 5 — Measurement & delivery | 20–23 | Done |
 
-See `docs/IMPLEMENTATION_PLAN.md` for the full staged plan and current position.
+See `docs/IMPLEMENTATION_PLAN.md` for the full staged plan and `docs/SESSION_STATE.md` for
+the detailed, per-stage running log.
+
+## Results
+
+The core deliverable is the ablation ladder — the measured cost of each privacy/security
+layer. Full table, figures, and interpretation: **[`docs/results.md`](docs/results.md)**.
+
+![Full ablation table](docs/figures/ablation_table_chart.png)
+
+Headline findings: federation trails centralized training by ~9 AUROC points (natural
+regime); Secure Aggregation is nearly free on accuracy; the DP epsilon sweep is cleanly
+monotonic (tighter privacy costs accuracy, as expected); non-IID heterogeneity (Dirichlet
+alpha) has the largest single effect of anything measured. See `docs/results.md` for the
+honest read on where federation does *not* beat a single hospital training alone in this
+dataset, and why.
 
 ## Documentation
 
@@ -34,6 +53,10 @@ See `docs/IMPLEMENTATION_PLAN.md` for the full staged plan and current position.
 |---|---|
 | `CLAUDE.md` | **Governing source of truth** — architecture, decisions, conventions |
 | `docs/IMPLEMENTATION_PLAN.md` | Project reference: overview, stack rationale, architecture, 24-stage plan |
+| `docs/SESSION_STATE.md` | Detailed, per-stage development log and continuity notes |
+| `docs/threat_model.md` | Threat actors, protection layers, known architectural tensions |
+| `docs/results.md` | The ablation table, figures, and interpretation |
+| `docs/reproducibility.md` | How every reported number traces to a config/seed/MLflow run |
 | `Review_1_Privacy_Preserving_FL_Diagnosis.pptx` | Original project proposal (do not modify) |
 
 ## Architecture at a glance
@@ -47,7 +70,8 @@ Hospital A / B / C   ->  local X-rays never leave
                           global model broadcast; round repeats
 ```
 
-Four independent protection layers, each covering a different asset:
+Four independent protection layers, each covering a different asset — see
+`docs/threat_model.md` for the full write-up:
 
 | Layer | Protects | Mechanism |
 |---|---|---|
@@ -62,17 +86,18 @@ Python 3.11 · PyTorch · DenseNet121 · Flower (FedAvg, SecAgg+) · Opacus · O
 torchvision · Grad-CAM · Monte Carlo Dropout · Hydra/OmegaConf · MLflow (local) ·
 Docker Compose · pytest
 
-Exact pinned versions live in the dependency file — see CLAUDE.md §4 for roles and rationale.
+Exact pinned versions live in the dependency file — see `CLAUDE.md` §4 for roles and
+rationale.
 
 ## Repository layout
 
 ```
 conf/        Hydra configs (model, data, federated, privacy, experiment)
-src/         data, models, privacy, federated, explain, uncertainty, evaluation, utils
-scripts/     dataset prep, cert generation, experiment runners
-tests/       pytest suite (see CLAUDE.md 11.3)
-docker/      Dockerfiles + compose for the multi-client prototype
-docs/        plan, threat model, results, reproducibility
+src/         data, models, privacy, federated, explain, uncertainty, evaluation, training, utils
+scripts/     dataset prep, cert generation, experiment/ablation runners, figure generation
+tests/       pytest suite, 145 tests (see CLAUDE.md 11.3)
+docker/      Dockerfiles + compose for the multi-client deployment demonstration
+docs/        plan, session log, threat model, results, reproducibility, figures
 data/        raw/processed data (gitignored); partitions + manifests are committed
 ```
 
@@ -80,33 +105,42 @@ data/        raw/processed data (gitignored); partitions + manifests are committ
 
 ```bash
 scripts/setup_env.sh        # or: uv sync --all-groups
-uv run pytest tests/        # verify the environment and reproducibility spine
+uv run pytest tests/        # 145 tests; dataset/GPU-dependent tests skip gracefully if absent
 ```
 
 Requires [uv](https://docs.astral.sh/uv/) and a CUDA-capable GPU for the pinned `torch==2.13.0+cu126`
-build (CPU-only machines can drop the `[tool.uv.sources]` pin in `pyproject.toml`).
+build (CPU-only machines can drop the `[tool.uv.sources]` pin in `pyproject.toml`; the
+CI workflow at `.github/workflows/tests.yml` does exactly this).
 
-## Evaluation plan
+Reproduce the ablation table and figures from the tracked MLflow data:
 
-The core result is an ablation ladder measuring what each privacy layer costs:
+```bash
+uv run python -m src.evaluation.tables               # prints the ablation table
+uv run python scripts/generate_result_figures.py     # regenerates docs/figures/*.png
+```
 
-| # | Configuration | Establishes |
-|---|---|---|
-| 1 | Single hospital, local only | The floor |
-| 2 | Centralized pooled | The privacy-free ceiling |
-| 3 | FedAvg | Does federation recover centralized performance? |
-| 4 | FedAvg + Secure Aggregation | Cost of quantization and masking |
-| 5 | FedAvg + Differential Privacy | The privacy–utility curve |
-| 6 | Full system | The integrated result |
+Run the multi-client deployment demonstration (real TLS, real SecAgg+, real separate
+processes via Docker Compose):
 
-Reported with AUROC (primary), AUPRC, sensitivity, specificity, F1 and balanced accuracy,
-with bootstrap 95% CIs over at least 3 seeds, plus communication and compute overhead.
+```bash
+scripts/run_deployment.sh
+```
 
 ## Data
 
 Kermany chest X-ray (Hospital A) and RSNA Pneumonia Detection Challenge (Hospitals B, C).
 **RSNA requires a Kaggle account and acceptance of the competition rules.** No patient data
-is stored in this repository; only split manifests and checksums are committed.
+is stored in this repository; only split manifests, partition indices, and checksums are
+committed (`data/partitions/*.json`, allowlisted in `.gitignore`).
+
+## Limitations
+
+Stated honestly rather than concealed — full list in `CLAUDE.md` §15. The headline ones:
+simulated hospitals (not a real cross-institutional deployment); the frozen backbone caps
+achievable accuracy relative to full fine-tuning; the DP mechanism as implemented is
+effectively *local* DP, which has worse utility than central DP at equal epsilon
+(`docs/threat_model.md`); malicious/Byzantine clients are out of scope; MC Dropout is a
+known-weak, potentially poorly-calibrated uncertainty estimator.
 
 ## Project
 
