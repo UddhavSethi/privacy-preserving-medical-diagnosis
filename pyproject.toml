@@ -124,3 +124,20 @@ reconstruction-threshold = 2
 # found via the Stage 15 live validation run, not by inspection). 20000 gives
 # headroom above the largest hospital with room to spare for future partitions.
 max-weight = 20000
+
+# Stage 16 — TLS + client authentication (ADR-4). Targets a locally-run
+# deployment-engine SuperLink (`flower-superlink`), not the simulation runtime
+# used by every prior stage's `--federation-config "num-supernodes=N"` — the
+# simulation runtime has no real network connections, so TLS/node auth cannot
+# be exercised through it at all (confirmed by the SuperLink's own runtime
+# warning). At flwr==1.35.0 the SuperLink target is resolved through a named
+# connection in the user-level `~/.flwr/config.toml` (the same registry
+# `flwr supernode register` reads), NOT a `[tool.flwr.federations.X]` block
+# here — defining both under the same name triggers a "legacy TOML
+# migration" conflict and `flwr run` fails outright (found via this stage's
+# own live validation, not by inspection). Run with `flwr run . deployment`
+# after `scripts/generate_certs.sh`, after adding a `[superlink.deployment]`
+# entry to `~/.flwr/config.toml` (see `docs/SESSION_STATE.md`'s Stage 16
+# note for the exact entry), and after registering each hospital's public
+# key (`flwr supernode register certs/hospital_A.pub deployment`, etc.)
+# against a SuperLink started with `--enable-supernode-auth` + TLS.
