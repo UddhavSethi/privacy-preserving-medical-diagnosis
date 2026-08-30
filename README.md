@@ -15,11 +15,13 @@ explanations and calibrated-confidence deferral to a clinician.
 
 ## Status
 
-**Stages 0–23 complete.** Federated pipeline (FedAvg + Differential Privacy + Secure
-Aggregation + TLS/client auth), Grad-CAM explainability, Monte Carlo Dropout deferral, a
-Docker Compose multi-client deployment, a real full ablation campaign, and this
-documentation package are all implemented, tested, and validated against real live runs
-— not mocked. 145 tests passing.
+**Stages 0–23 complete**, plus **Phase 6 optional extensions OPT-1 through OPT-5**.
+Federated pipeline (FedAvg + Differential Privacy + Secure Aggregation + TLS/client
+auth), Grad-CAM explainability, Monte Carlo Dropout deferral, a Docker Compose
+multi-client deployment, a real full ablation campaign, and a set of deeper research
+extensions (calibration, an empirical privacy attack, quantitative Grad-CAM
+evaluation, conformal prediction, an OOD detection gate) are all implemented, tested,
+and validated against real live runs — not mocked. 193 tests passing.
 
 | Phase | Stages | Status |
 |---|---|---|
@@ -29,6 +31,7 @@ documentation package are all implemented, tested, and validated against real li
 | 3 — Federated core | 13–17 | Done |
 | 4 — Clinical trust | 18, 19 | Done |
 | 5 — Measurement & delivery | 20–23 | Done |
+| 6 — Optional research extensions | OPT-1–5 done, OPT-6 (Streamlit demo) pending discussion | Done / pending |
 
 See `docs/IMPLEMENTATION_PLAN.md` for the full staged plan and `docs/SESSION_STATE.md` for
 the detailed, per-stage running log.
@@ -60,6 +63,7 @@ dataset, and why.
 | `docs/privacy_attack.md` | OPT-2: empirical membership-inference attack against trained checkpoints |
 | `docs/gradcam_localization.md` | OPT-3: quantitative Grad-CAM evaluation against RSNA bounding boxes |
 | `docs/conformal.md` | OPT-4: conformal prediction coverage/set-size analysis |
+| `docs/ood_detection.md` | OPT-5: per-hospital Isolation Forest out-of-distribution gate |
 | `docs/reproducibility.md` | How every reported number traces to a config/seed/MLflow run |
 | `Review_1_Privacy_Preserving_FL_Diagnosis.pptx` | Original project proposal (do not modify) |
 
