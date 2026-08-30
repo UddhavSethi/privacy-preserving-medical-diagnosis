@@ -169,8 +169,9 @@ re-asserted by a dedicated test against the live files).
 | 14 — Differential Privacy with formal accounting (ablation row 5) | **Done — DG-7 resolved and applied.** Opacus DP-SGD wired into `client_app.py` as a config-switchable layer (`dp-enabled`, default `false`; Stage 13's no-DP path untouched). 111/111 tests passing (10 new). Two real live `flwr run` DP runs at epsilon=4 and epsilon=1, confirming the expected privacy-utility tradeoff. See note below the table. | 90bf95f |
 | 15 — Secure Aggregation with Flower SecAgg+ (ablation row 4) | **Done — real live `flwr run` with SecAgg+ actually masking updates.** SecAgg+ at flwr==1.35.0 only integrates via Flower's legacy Strategy/workflow API (not Stage 13/14's Message-API `strategy.start()`), confirmed against installed source + Flower's own reference example — a genuine API-surface finding, raised with and approved by the owner before implementation. Separate `client_app_secagg.py`/`server_app_secagg.py` app pair. 114/114 tests passing (3 new). See note below the table. | 20cc551 |
 | 16 — TLS + client authentication (ADR-4) | **Done — real TLS + Flower node-authentication validated end-to-end, deployment engine (not simulation), using Stage 13/14's canonical app unmodified (ADR-8 confirmed).** `scripts/generate_certs.sh`, `src/federated/security.py`, `conf/federated/tls.yaml`, `tests/{test_tls_auth,test_security}.py`. 119/119 tests passing (5 new), including a real subprocess-level negative test (unregistered SuperNode rejected) and positive test (registered SuperNode accepted). See note below the table. | e078cee |
-| 17 — Docker Compose multi-client deployment | **Done — real `docker compose` run, 4 separate containers over a real Docker network, all 3 hospitals training every round, clean teardown.** Scope (owner-approved 2026-08-30): FedAvg + TLS/auth only, CPU-only (DG-9). `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}`, `scripts/{run_deployment.sh,prepare_deployment_shards.py}`, `client_app.py`'s `_resolve_config()` addition. Three real bugs found and fixed via live runs, not inspection — see note below the table. Still 119/119 (no new unit tests — infra/deployment stage). | (pending commit this session) |
-| 18–23 | Not started | — |
+| 17 — Docker Compose multi-client deployment | **Done — real `docker compose` run, 4 separate containers over a real Docker network, all 3 hospitals training every round, clean teardown.** Scope (owner-approved 2026-08-30): FedAvg + TLS/auth only, CPU-only (DG-9). `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}`, `scripts/{run_deployment.sh,prepare_deployment_shards.py}`, `client_app.py`'s `_resolve_config()` addition. Three real bugs found and fixed via live runs, not inspection — see note below the table. Still 119/119 (no new unit tests — infra/deployment stage). | 3ece93a |
+| 18 — Grad-CAM explainability | **Done — real, non-degenerate, class-discriminative heatmaps on real trained checkpoints and real chest X-rays.** A real ADR-1/Grad-CAM interaction the plan itself flagged as needing empirical verification turned out to be a real bug (crash, not silent wrong output) on the first live test run — see note below the table. `src/explain/gradcam.py`, `scripts/generate_explanations.py`. 125/125 tests passing (6 new). | (pending commit this session) |
+| 19–23 | Not started | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -810,6 +811,77 @@ and all of Phase 3 (Stages 13–17) are now complete — the entire FL + DP + Se
 TLS/auth + Docker deployment core (rows 1-6 of the ablation ladder are all
 individually implementable, and the demonstration artifact is real and working).**
 
+**Stage 18 (`src/explain/gradcam.py`, `scripts/generate_explanations.py`,
+`tests/test_gradcam.py`) — Grad-CAM explainability (CLAUDE.md §9, objective 6's
+explanation half). The first Phase 4 stage, and the first genuinely lower-risk
+stage this session (no Flower protocol surface, no distributed timing) — but
+still surfaced a real bug on its own first live test run, exactly per the
+plan's own explicit warning that the ADR-1/Grad-CAM interaction "must be
+verified, not assumed."**
+
+**Real bug found and fixed, empirically, not by inspection:** `pytorch-grad-cam`'s
+plain `GradCAM` class does not mark its input tensor `requires_grad=True` on
+its own — that only happens when its (unexposed-by-`GradCAM`) `compute_input_gradient`
+flag is `True`, which it isn't by default. For an ordinarily fully-trainable
+model this is invisible, since *some* parameter upstream already requires
+grad, so PyTorch builds the graph anyway. With ADR-1's entirely-frozen
+backbone (`requires_grad=False` on every backbone parameter) **and** an input
+tensor that also doesn't require grad, *nothing* in the forward pass needed a
+gradient at all — PyTorch never built an autograd graph, the target layer's
+forward hook fired fine (real activations captured), but its backward hook
+never fired (`grads=None`), producing a hard `AttributeError` crash the
+moment the very first test ran. Fixed in `src/explain/gradcam.py` by
+explicitly calling `image_tensor.clone().requires_grad_(True)` before handing
+the tensor to the library — load-bearing for this project's architecture,
+harmless/unnecessary-but-safe for an ordinary model.
+
+**A second, softer finding from the same verification process**: querying
+Grad-CAM for a class the model is *confidently rejecting* (e.g. asking "what
+looks Normal about this?" on an image the model is >99.99% sure is
+Pneumonia) can legitimately produce an all-zero heatmap after Grad-CAM's own
+final ReLU — there's no localized positive evidence for a class the model
+has no support for anywhere in the image. This isn't a bug; it's correct
+Grad-CAM behavior. The test suite was written to distinguish this correctly:
+"overlays render for both classes" is a functional (shape/dtype/range)
+claim, not a non-degeneracy claim for every class — the actual non-degeneracy
+claim is checked specifically against the model's own *predicted* class,
+where it has real evidence.
+
+**Target layer**: `model.features.norm5` (DenseNet121's final backbone
+BatchNorm2d, pre-ReLU/pre-pool) — matches CLAUDE.md §9's already-approved
+text exactly, no new decision needed.
+
+**Real batch generation, not a toy example**: `scripts/generate_explanations.py`
+evaluated Stage 12's trained centralized checkpoint (`natural_seed42.pt`) on
+the full real pooled test set (4,838 images across all 3 hospitals) at the
+Stage 10 default 0.5 threshold — TP=1158, FP=476, TN=2860, FN=344 (implied
+accuracy ≈83.1%, sensitivity ≈77.1%, specificity ≈85.7%, consistent with
+Stage 12's own reported pooled AUROC of ~0.90-0.93). A real, if minor, bucket-composition
+bug was found and fixed here too: records are collected Hospital-A-first, and
+since Kermany's own classifier is highly accurate, its small TN/FP/FN buckets
+filled up the `[:EXAMPLES_PER_BUCKET]` slice before any RSNA record was ever
+reached — the first run's saved output was accidentally 100% Kermany. Fixed
+with a fixed-seed shuffle before bucketing, confirmed via the second run's
+actual output files spanning both sources. Visually inspected a handful of
+real overlays (not just the automated border-energy proxy test) — a real
+pneumonia-positive case's heatmap concentrated over the correct (opacity-side)
+lung field, not the image border or the "R"/"L" laterality marker; a real
+false-negative case's heatmap (targeting its wrongly-predicted "Normal"
+class) concentrated over central mediastinal structures, a plausible
+"looks unremarkable" justification for the model's mistake.
+
+6 new tests (125 total), `tests/test_gradcam.py`: target-layer resolution,
+gradient-flow-through-the-frozen-backbone (using a real trained checkpoint
+and the model's own predicted class — an earlier version of this test used
+an untrained random-init model and was flaky, since an untrained classifier
+head's Grad-CAM sign pattern is essentially a coin flip, not a reliable
+signal of whether gradients are flowing correctly), functional both-classes
+rendering, non-degeneracy for the predicted class specifically,
+class-discriminativeness (the two per-class heatmaps for one image must
+differ), and the border-energy proxy for "not latching onto scanner
+artifacts/text" (CLAUDE.md's own named chest-X-ray failure mode to check
+for).
+
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
 (Isolation Forest OOD detection gate, scoped to chest-X-ray anomaly detection only, not
@@ -895,26 +967,22 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. Stage 17 is about to be committed on top of `e078cee`
-(Stage 16) — `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}`
-(new), `scripts/run_deployment.sh` (new), `scripts/prepare_deployment_shards.py`
-(new), `scripts/generate_certs.sh` (SAN fix for the `superlink` Compose
-hostname), `src/federated/client_app.py` (`_resolve_config()` addition),
-plus this file's update. `certs/`, `data/deployment_shards/`, and
-`.flwr_home/` were all generated locally during validation and confirmed
-absent from `git status` throughout (all gitignored, `.flwr_home/` added to
-`.gitignore` this stage). No changes to `pyproject.toml`/`uv.lock` — the
-Docker-specific dependency list lives only in the two Dockerfiles, at the
-same pinned versions. Check `git log --oneline -5` on resume — this file is
-not re-updated after every single commit within a session, only at natural
-pause points.
+**Branch:** `main`. Stage 18 is about to be committed on top of `3ece93a`
+(Stage 17) — `src/explain/gradcam.py` (new), `scripts/generate_explanations.py`
+(new), `tests/test_gradcam.py` (new), plus this file's update and a small
+CLAUDE.md §9 implementation note. `outputs/explanations/` (generated PNG
+overlays) is gitignored (`outputs/` already covered) — confirmed absent from
+`git status`. No changes to `pyproject.toml`/`uv.lock` (`grad-cam==1.5.7` was
+already pinned, just unused until now). Check `git log --oneline -5` on
+resume — this file is not re-updated after every single commit within a
+session, only at natural pause points.
 
 ```
+3ece93a Stage 17: Docker Compose multi-client deployment
 e078cee Stage 16: TLS + client authentication (ADR-4)
 20cc551 Stage 15: Secure Aggregation via Flower SecAgg+ (ablation row 4)
 90bf95f Stage 14: Differential Privacy with formal accounting (ablation row 5) — DG-7 resolved
 915dae5 Stage 13: Flower FedAvg in simulation — FedAvg verified end-to-end (ablation row 3)
-f684195 Stage 12: centralized pooled baseline (ablation row 2) — Phase 2 complete
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -926,45 +994,46 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-**Stage 17 is complete — Phase 3 is entirely done.** A real `docker compose`
-run (4 separate containers, real TLS, real client auth, real per-hospital
-filesystem isolation) completed 3 full federated rounds with all 3 hospitals
-participating every round, using Stage 13/14/16's canonical app completely
-unmodified — the strongest confirmation yet of ADR-8's "same code, both
-engines" claim. See §7's Stage 17 note for the two scope decisions (DG-9:
-CPU-only/few-rounds; FedAvg+TLS/auth only, SecAgg deferred), the real
-per-hospital data-isolation mechanism (`prepare_deployment_shards.py` +
-`client_app.py`'s new `_resolve_config()`), the three real bugs found and
-fixed via live runs (CUDA dependency bloat in the Docker build; a TLS SAN
-mismatch for the `superlink` Compose hostname; a registration-before-connection
-race that permanently crashed one SuperNode's first connection attempt), and
-the full real per-round results (round 3: `pooled_test_auroc=0.8148`,
-`client_val_auroc=0.8428`).
+**Stage 18 is complete — Grad-CAM produces real, verified, non-degenerate,
+class-discriminative heatmaps on real trained checkpoints and real chest
+X-rays.** Despite being a comparatively lower-risk stage than Phase 3 (no
+Flower protocol surface), it still surfaced a real bug on its very first live
+test run, exactly matching the plan's own explicit warning that the
+ADR-1/Grad-CAM interaction "must be verified, not assumed" — see §7's Stage
+18 note for: the real bug (plain `GradCAM` doesn't mark its input
+`requires_grad=True` by default, and with ADR-1's fully-frozen backbone
+nothing else upstream does either, so no gradient graph was ever built —
+fixed by explicitly setting it in `src/explain/gradcam.py`), the softer
+finding about confidently-rejected-class queries legitimately producing
+all-zero heatmaps (not a bug, correct Grad-CAM behavior — the test suite
+distinguishes "renders functionally" from "is non-degenerate for the
+predicted class"), the real batch-generation results (4,838 pooled test
+images, TP=1158/FP=476/TN=2860/FN=344), and the bucket-composition shuffle
+fix (the first run's saved examples were accidentally 100% Kermany).
 
-**Every make-or-break/high-risk stage in the entire FL+DP+SecAgg+TLS+deployment
-core (8, 13, 14, 15, 16, 17) is now cleared.** Phase 3 (Stages 13-17) is fully
-done: all four privacy/security layers work individually, live, for real, and
-the demonstration artifact (Docker Compose) actually runs end to end.
+Next is **Stage 19 — Monte Carlo Dropout and deferral** (`REQ`, **`M`-sized**,
+**Decision Gate DG-10**) — the confidence half of objective 6, delivering the
+human-in-the-loop mechanism CLAUDE.md requires to actually exist in code, not
+merely be described: the same image passed through the network T times with
+dropout active at inference (Stage 8's head-only `Dropout(p=0.3)`, already in
+place — no architecture change needed here, unlike Grad-CAM's target-layer
+question), yielding a predictive distribution → confidence estimate →
+deferral decision for low-confidence predictions. **DG-10, open and needing
+the owner's input before this stage can be scoped**: the deferral threshold
+policy is explicitly named in the plan as "a clinical policy decision, not a
+hyperparameter" — not something to default silently. Also configurable and
+worth surfacing per CLAUDE.md §10: number of stochastic forward passes T,
+dropout rate (already fixed at 0.3 from Stage 8), and the uncertainty metric
+(predictive entropy vs. variance). Honest framing already established in
+CLAUDE.md §10: MC Dropout is a known-weak, often-poorly-calibrated
+uncertainty estimator — approved as the baseline because it's cheap and the
+source deck mandates it, with stronger methods and calibration metrics
+explicitly deferred to §16.1's optional directions.
 
-Next is **Phase 4 — the clinical trust layer**, starting with **Stage 18 —
-Grad-CAM explainability** (`REQ`, **`M`-sized**) — applying Grad-CAM to the
-global model (target layer: final dense block / `features.norm5`) to produce
-heatmap overlays showing which lung regions drove each Pneumonia/Normal
-prediction, executed client-side on already-local images so nothing needs to
-move. Uses an established library (`pytorch-grad-cam`, already a pinned
-dependency — `grad-cam==1.5.7`, unused until now). What it needs: batch
-generation across true positive/false positive/true negative/false negative
-cases, heatmap overlay rendering, and (per CLAUDE.md §9) an honest framing
-that qualitative heatmaps alone are illustrative, not a result — quantitative
-Grad-CAM evaluation is an explicitly pending optional direction (§16.1), not
-in scope here.
-
-No open decision gate blocks Stage 18. It's a comparatively lower-risk,
-lower-integration-surface stage than anything in Phase 3 (no Flower protocol
-concerns, no new API-version verification needed, no distributed systems
-timing issues) — reads an already-trained checkpoint and a library call away
-from a usable result. Given Phase 3's scope and the number of real bugs
-chased down this session, **a check-in before starting Stage 18 is still the
-established pattern**, but the risk profile is genuinely lower going forward
-through Phase 4 (Stage 19 MC Dropout is similarly self-contained) than
-anything just completed.
+Given Grad-CAM (lower risk than Phase 3, per the note above) still produced a
+real bug on first contact, **the discipline of live-verifying rather than
+assuming continues to matter through the rest of Phase 4** — but the overall
+risk profile remains genuinely lower than anything in Phase 3 (no distributed
+systems, no new external API surface to verify against a pinned version).
+DG-10 is the actual blocker for full scoping; a check-in before starting is
+warranted for that reason specifically, not just as a default pattern.
