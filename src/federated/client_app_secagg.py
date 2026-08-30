@@ -31,6 +31,7 @@ from flwr.client.mod import secaggplus_mod
 from flwr.common import Context
 
 from src.evaluation.metrics import compute_metrics
+from src.evaluation.overhead import classifier_payload_size_bytes, measure_wall_clock
 from src.models.densenet_head import DenseNet121Head
 from src.training.trainer import HospitalFeatures, load_hospital_features, train_local_round
 
@@ -67,19 +68,31 @@ class SecAggClient(NumPyClient):
     def fit(self, parameters, config):
         reference_keys = list(self.model.classifier.state_dict().keys())
         self.model.classifier.load_state_dict(_ndarrays_to_state(parameters, reference_keys))
-        result = train_local_round(
-            self.model,
-            self.features.train_features,
-            self.features.train_labels,
-            seed=self.seed,
-            local_epochs=self.local_epochs,
-            lr=self.lr,
-            batch_size=self.batch_size,
-        )
+        # Stage 20: local-training-only wall-clock (mirrors client_app.py's
+        # instrumentation) — the SecAgg masking/quantization/multi-stage
+        # handshake itself happens OUTSIDE this call, inside Flower's own
+        # secaggplus_mod wrapping it, so this number isolates compute
+        # overhead from this stage's own SecAgg-protocol overhead (measured
+        # instead by comparing whole-round wall-clock against the plain
+        # FedAvg app, per this stage's own note on that limitation).
+        with measure_wall_clock() as timing:
+            result = train_local_round(
+                self.model,
+                self.features.train_features,
+                self.features.train_labels,
+                seed=self.seed,
+                local_epochs=self.local_epochs,
+                lr=self.lr,
+                batch_size=self.batch_size,
+            )
         return (
             _state_to_ndarrays(result["classifier_state"]),
             result["num_examples"],
-            {"train_loss": result["train_loss"]},
+            {
+                "train_loss": result["train_loss"],
+                "wall_clock_seconds": timing.wall_clock_seconds,
+                "payload_bytes": classifier_payload_size_bytes(result["classifier_state"]),
+            },
         )
 
     def evaluate(self, parameters, config):
