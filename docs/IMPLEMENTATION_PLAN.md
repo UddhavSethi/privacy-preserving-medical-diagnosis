@@ -744,23 +744,25 @@ Strict ordering applies throughout this phase: no federated learning before a wo
 **9. Architecture change?** Possibly refines ADR-4's stated mechanism once verified.
 
 ## Stage 17 — Docker Compose multi-client deployment
-**Class:** REQ  **Size:** M  **DECISION GATE DG-9**
+**Class:** REQ  **Size:** M  **DECISION GATE DG-9 (resolved 2026-08-30)**
 
-**1. Goal.** Produce the demonstration artifact: separate containers, real gRPC, real TLS, real SecAgg+, and genuine per-hospital data isolation.
+**1. Goal.** Produce the demonstration artifact: separate containers, real gRPC, real TLS, real client authentication, and genuine per-hospital data isolation.
 
-**2. What we implement.** Client and server images; a compose file defining one server and three hospital containers, each with its own certificate and its own mounted data shard; a run script.
+**2. What we implement.** Client and server images; a compose file defining one server and three hospital containers, each with its own certificate/key and its own mounted data shard (physically absent for the other two hospitals, not merely filtered in code); a run script.
 
-**3. Files created.** `docker/Dockerfile.client`, `docker/Dockerfile.server`, `docker/docker-compose.yml`, `scripts/run_deployment.sh`.
+**Scope (owner-approved 2026-08-30): FedAvg + TLS/client-auth only** — the canonical Stage 13/14/16 `client_app.py`/`server_app.py`, unmodified except for one small additive change (`client_app.py`'s `_resolve_config()`, letting each container's `--node-config` override the run-level `feature-cache-dir`/`partition-path` for real filesystem-level data isolation — simulation mode's behavior is untouched, since it never sets those at the node level). SecAgg+'s separate legacy-API app pair (Stage 15) is not part of this demonstration; combining every layer at once (DP + SecAgg + TLS, ablation row 6) is deferred as its own later integration step, since it would require reconciling Stage 15's legacy-API SecAgg app with the canonical Message-API app plus DP before Docker packaging could even begin — real integration work, not a packaging concern.
 
-**4. Dependencies required.** Docker and Docker Compose.
+**3. Files created.** `docker/Dockerfile.client`, `docker/Dockerfile.server`, `docker/docker-compose.yml`, `scripts/run_deployment.sh`, `scripts/prepare_deployment_shards.py` (pre-slices the shared feature cache into one directory per hospital, containing only that hospital's records, for real filesystem-level isolation — not in the original file list, added because "each container can access only its own data" otherwise can't be verified as anything stronger than in-process filtering).
+
+**4. Dependencies required.** Docker and Docker Compose (both already present on the dev machine). No new Python dependencies — the container images install the same pinned versions from `pyproject.toml`/`uv.lock`, substituting CPU-only torch/torchvision wheels for the host environment's CUDA build (DG-9).
 
 **5. Prerequisites.** Stages 13 through 16 all working in simulation.
 
-**6. Testing and validation.** `docker compose up` completes federated rounds end to end with DP, SecAgg and TLS all active; each container can access only its own data; the demonstration is reproducible from a clean checkout.
+**6. Testing and validation.** `docker compose up` completes federated rounds end to end with TLS and client authentication both active, using the canonical app; each hospital container can access only its own data (verified at the filesystem level via `scripts/prepare_deployment_shards.py`'s per-hospital directories, not just code-level patient_id filtering); the demonstration is reproducible from a clean checkout via `scripts/run_deployment.sh`.
 
 **7. Expected output.** The single most convincing demonstration available — federation that is not merely three processes on one laptop.
 
-**8. Risks.** DG-9: GPU access inside Docker requires the NVIDIA container toolkit, and three GPU containers will not fit within 4 GB. The recommendation is that the demonstration runs CPU-only with few rounds, since it is a demonstration rather than a measurement — measurements come from simulation per ADR-8. Image size with a CUDA torch build is large. Certificate paths and networking differ from host runs.
+**8. Risks.** DG-9 (resolved): CPU-only, few rounds — owner confirmed this is a demonstration, not a measurement (real numbers already come from simulation, Stages 11-15). Image size with a CUDA torch build would have been large; avoided entirely by installing CPU wheels in the Docker build context only (the committed `pyproject.toml`/`uv.lock` and host dev environment are unchanged). Certificate/key paths and container networking (Docker DNS service names, not `127.0.0.1`) differ from Stage 16's host-only validation — handled via per-service bind mounts and `--superlink=superlink:9092`-style service-name addressing.
 
 **9. Architecture change?** No; it clarifies the division of labour described in CLAUDE.md section 3.3.
 

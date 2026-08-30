@@ -1,0 +1,106 @@
+# Stage 17 — Docker Compose multi-client deployment (CLAUDE.md section 3.3's
+# "Deployment" execution engine: real separate containers, real gRPC, real TLS,
+# real per-hospital data isolation). Demonstration scope only (DG-9,
+# owner-approved 2026-08-30): CPU-only, few rounds — the measured ablation
+# results come from simulation (Stages 11-15), not from this compose file.
+#
+# Scope (owner-approved 2026-08-30): FedAvg + TLS/client-auth only — the
+# canonical Stage 13/14/16 client_app.py/server_app.py, unmodified. SecAgg+'s
+# separate legacy-API app pair (Stage 15) and DP (Stage 14, config-switchable
+# but untested together with SecAgg's app) are not part of this demonstration;
+# combining every layer at once (ablation row 6) is deferred as its own
+# integration step.
+#
+# Run via scripts/run_deployment.sh, not directly — that script generates
+# certs and per-hospital data shards first (both required, both gitignored,
+# neither committed).
+services:
+  superlink:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    volumes:
+      - ../certs/ca.crt:/certs/ca.crt:ro
+      - ../certs/server.pem:/certs/server.pem:ro
+      - ../certs/server.key:/certs/server.key:ro
+      # The ServerApp's own centralized pooled-test-set evaluation (unchanged
+      # since Stage 13 — `server_app.py`'s `_make_centralized_evaluate_fn`)
+      # legitimately reads across all hospitals' cached *features* for
+      # reporting purposes; this is a pre-existing, already-approved pattern,
+      # not new server-side access this stage introduces. Mounted at the same
+      # absolute path pyproject.toml's [tool.flwr.app.config] already uses, so
+      # server_app.py needs no code change at all. Distinct from the
+      # hospital containers below, which only ever see their own single
+      # hospital's data — the "no container sees another hospital's raw or
+      # cached data" claim is about client containers, not this pre-existing
+      # server-side aggregate-reporting path.
+      - ../data/feature_cache:/mnt/storage/pneumonia-detection/data/feature_cache:ro
+      - ../data/partitions:/mnt/storage/pneumonia-detection/data/partitions:ro
+    ports:
+      - "9092:9092" # Fleet API — SuperNodes connect here (also published for host-side debugging)
+      - "9093:9093" # Control API — `flwr run` / `flwr supernode register` target this from the host
+    command:
+      - --ssl-ca-certfile=/certs/ca.crt
+      - --ssl-certfile=/certs/server.pem
+      - --ssl-keyfile=/certs/server.key
+      - --enable-supernode-auth
+      - "--database=:flwr-in-memory:"
+      - --disable-runtime-dependency-installation
+      - --fleet-api-address=0.0.0.0:9092
+      - --control-api-address=0.0.0.0:9093
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 9093), timeout=2)"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  hospital-a:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.client
+    depends_on:
+      superlink:
+        condition: service_healthy
+    volumes:
+      - ../certs/ca.crt:/certs/ca.crt:ro
+      - ../certs/hospital_A:/certs/hospital_A:ro
+      - ../data/deployment_shards/hospital_A:/data/hospital:ro
+    command:
+      - --root-certificates=/certs/ca.crt
+      - --superlink=superlink:9092
+      - --auth-supernode-private-key=/certs/hospital_A
+      - --node-config=partition-id=0 num-partitions=3 feature-cache-dir="/data/hospital" partition-path="/data/hospital/partition.json"
+
+  hospital-b:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.client
+    depends_on:
+      superlink:
+        condition: service_healthy
+    volumes:
+      - ../certs/ca.crt:/certs/ca.crt:ro
+      - ../certs/hospital_B:/certs/hospital_B:ro
+      - ../data/deployment_shards/hospital_B:/data/hospital:ro
+    command:
+      - --root-certificates=/certs/ca.crt
+      - --superlink=superlink:9092
+      - --auth-supernode-private-key=/certs/hospital_B
+      - --node-config=partition-id=1 num-partitions=3 feature-cache-dir="/data/hospital" partition-path="/data/hospital/partition.json"
+
+  hospital-c:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.client
+    depends_on:
+      superlink:
+        condition: service_healthy
+    volumes:
+      - ../certs/ca.crt:/certs/ca.crt:ro
+      - ../certs/hospital_C:/certs/hospital_C:ro
+      - ../data/deployment_shards/hospital_C:/data/hospital:ro
+    command:
+      - --root-certificates=/certs/ca.crt
+      - --superlink=superlink:9092
+      - --auth-supernode-private-key=/certs/hospital_C
+      - --node-config=partition-id=2 num-partitions=3 feature-cache-dir="/data/hospital" partition-path="/data/hospital/partition.json"
