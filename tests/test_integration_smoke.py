@@ -14,6 +14,18 @@ absolute-path requirements — never by a unit test alone).
 
 A real subprocess invocation, not a mock — matches the discipline used for
 every Flower-protocol claim this session (Stages 13-21).
+
+Isolation: overrides `mlflow-tracking-uri` to a throwaway sqlite file in
+`tmp_path` rather than letting it fall through to pyproject.toml's real
+default (`mlruns.db`) — found necessary the hard way, not by inspection:
+this test's own early runs (before this fix) silently wrote extra
+"fedavg_natural_seed42"-named runs into the real campaign's MLflow
+experiment, contaminating `src.evaluation.tables`' seed-aggregated query for
+that exact configuration (it filters on `partition_path`/`dp_enabled`, not
+`seed`, so any additional matching run — regardless of which seed it
+claims — gets folded into the average). The stray runs were found and
+deleted from the real `mlruns.db` after the fact; this fix stops it from
+happening again on every future run of this test (including in CI).
 """
 import subprocess
 from pathlib import Path
@@ -30,11 +42,13 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_single_round_federated_smoke_end_to_end():
+def test_single_round_federated_smoke_end_to_end(tmp_path):
+    isolated_mlflow_uri = f"sqlite:///{tmp_path / 'smoke_test_mlruns.db'}"
     result = subprocess.run(
         [
             "uv", "run", "flwr", "run", ".",
-            "--run-config", "num-server-rounds=1",
+            "--run-config",
+            f'num-server-rounds=1 mlflow-tracking-uri="{isolated_mlflow_uri}"',
             "--federation-config", "num-supernodes=3",
             "--stream",
         ],

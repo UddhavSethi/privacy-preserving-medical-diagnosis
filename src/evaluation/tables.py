@@ -29,7 +29,7 @@ def load_local_baseline_row(regime: str) -> dict:
     hospital_means = [data[regime][h]["auroc"]["mean"] for h in ("A", "B", "C")]
     hospital_stds = [data[regime][h]["auroc"]["std"] for h in ("A", "B", "C")]
     return {
-        "row": "1. Local (per-hospital, averaged)",
+        "row": f"1. Local ({regime}, per-hospital avg.)",
         "regime": regime,
         "mean_auroc": sum(hospital_means) / len(hospital_means),
         "std_auroc": sum(hospital_stds) / len(hospital_stds),  # mean of per-hospital stds, not seed-pooled
@@ -44,7 +44,7 @@ def load_centralized_baseline_row(regime: str) -> dict:
     data = json.loads((RESULTS_DIR / "centralized_baseline.json").read_text())
     pooled = data[regime]["pooled_test"]["auroc"]
     return {
-        "row": "2. Centralized (pooled)",
+        "row": f"2. Centralized ({regime}, pooled)",
         "regime": regime,
         "mean_auroc": pooled["mean"],
         "std_auroc": pooled["std"],
