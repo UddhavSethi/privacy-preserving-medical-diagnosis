@@ -167,8 +167,9 @@ re-asserted by a dedicated test against the live files).
 | 12 — Centralized pooled baseline (ablation row 2) | **Done.** 97/97 tests passing (3 new). Centralized model matched/exceeded every local baseline — all [OK]. See note below the table. | `f684195` |
 | 13 — Flower FedAvg in simulation (ablation row 3) | **Done — real 20-round FedAvg run completed end-to-end.** 101/101 tests passing (4 new). No privacy layers yet (by design — DP/SecAgg/TLS come next). Several real Flower-tooling issues hit and fixed; see note below the table. | (pending commit this session) |
 | 14 — Differential Privacy with formal accounting (ablation row 5) | **Done — DG-7 resolved and applied.** Opacus DP-SGD wired into `client_app.py` as a config-switchable layer (`dp-enabled`, default `false`; Stage 13's no-DP path untouched). 111/111 tests passing (10 new). Two real live `flwr run` DP runs at epsilon=4 and epsilon=1, confirming the expected privacy-utility tradeoff. See note below the table. | 90bf95f |
-| 15 — Secure Aggregation with Flower SecAgg+ (ablation row 4) | **Done — real live `flwr run` with SecAgg+ actually masking updates.** SecAgg+ at flwr==1.35.0 only integrates via Flower's legacy Strategy/workflow API (not Stage 13/14's Message-API `strategy.start()`), confirmed against installed source + Flower's own reference example — a genuine API-surface finding, raised with and approved by the owner before implementation. Separate `client_app_secagg.py`/`server_app_secagg.py` app pair. 114/114 tests passing (3 new). See note below the table. | (pending commit this session) |
-| 16–23 | Not started | — |
+| 15 — Secure Aggregation with Flower SecAgg+ (ablation row 4) | **Done — real live `flwr run` with SecAgg+ actually masking updates.** SecAgg+ at flwr==1.35.0 only integrates via Flower's legacy Strategy/workflow API (not Stage 13/14's Message-API `strategy.start()`), confirmed against installed source + Flower's own reference example — a genuine API-surface finding, raised with and approved by the owner before implementation. Separate `client_app_secagg.py`/`server_app_secagg.py` app pair. 114/114 tests passing (3 new). See note below the table. | 20cc551 |
+| 16 — TLS + client authentication (ADR-4) | **Done — real TLS + Flower node-authentication validated end-to-end, deployment engine (not simulation), using Stage 13/14's canonical app unmodified (ADR-8 confirmed).** `scripts/generate_certs.sh`, `src/federated/security.py`, `conf/federated/tls.yaml`, `tests/{test_tls_auth,test_security}.py`. 119/119 tests passing (5 new), including a real subprocess-level negative test (unregistered SuperNode rejected) and positive test (registered SuperNode accepted). See note below the table. | (pending commit this session) |
+| 17–23 | Not started | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -579,8 +580,114 @@ some other integration bug. A third test isolates `quantize`/`dequantize`
 alone to confirm the round-trip error is real (lossy, non-vacuous) but
 correctly bounded.
 
+**Stage 16 (`scripts/generate_certs.sh`, `src/federated/security.py`,
+`conf/federated/tls.yaml`, `tests/{test_tls_auth,test_security}.py`) — TLS +
+client authentication (ADR-4), the project's first stage to leave pure
+simulation.**
+
+**Mechanism verified against flwr==1.35.0's actual installed CLI (`flower-superlink
+--help`, `flower-supernode --help`, `flwr federation/supernode --help`), not
+memory or older docs — ADR-4 itself flags this area as changed across
+releases, ADR-5 requires verifying against the pinned version:**
+- Server TLS: `--ssl-ca-certfile`/`--ssl-certfile`/`--ssl-keyfile` on
+  `flower-superlink`.
+- Client (SuperNode) authentication: `--enable-supernode-auth` on the
+  SuperLink (hard-requires TLS — refuses `--insecure` outright) +
+  `--auth-supernode-private-key` on each SuperNode + the public half
+  pre-registered via `flwr supernode register`. **The old
+  `--auth-list-public-keys` flag this project's earlier notes might assume
+  is gone entirely at this version — it's a hard error, not just
+  deprecated**, with the CLI itself pointing at `--enable-supernode-auth` +
+  `flwr supernode register` as the replacement.
+- Keys are ECDSA-384, OpenSSH format (`ssh-keygen -t ecdsa -b 384`), verified
+  against Flower's own tested `framework/e2e/e2e-bare-auth/generate.sh`
+  reference (fetched from `flwrlabs/flower` on GitHub via `gh api`) — not
+  Ed25519, which is a *different*, unrelated Flower mechanism
+  (`--trusted-entities`).
+- Dynamic `RegisterNode` is disabled server-side once
+  `--enable-supernode-auth` is set — only pre-registered public keys can
+  connect at all, which is exactly ADR-4's claim.
+
+**A real, non-obvious operational finding, found via this stage's own live
+validation, not documentation:** `flwr supernode register`/`flwr run <app>
+<name>` resolve their target through a **named SuperLink connection** stored
+in the user-level `~/.flwr/config.toml` (`[superlink.<name>]`, the same
+registry holding the built-in `local` simulation alias and Flower's cloud
+`supergrid` alias) — **not** a project-level `[tool.flwr.federations.<name>]`
+block in `pyproject.toml`, even though that block is Flower's own documented
+mechanism elsewhere (confirmed via the same `e2e-bare-auth`/`test_superlink.sh`
+reference, which *does* inject a `[tool.flwr.federations.e2e]` block). Defining
+both under the same name simultaneously (as first attempted here) triggers a
+"legacy TOML migration" code path that fails outright with a confusing error
+("No federation name was provided..."). There is also no OSS CLI command to
+*create* a new named connection against a fresh local address (`flwr login`/
+`flwr federation create` both require the connection to already exist in
+`~/.flwr/config.toml` — likely gated behind Flower Enterprise's
+`FederationManager`, given the OSS build's `NoOpFederationManager` and the
+`flwr.ee`-guarded imports throughout `flwr.superlink.config_loader`). The
+practical fix: **the `pyproject.toml` federations block was removed**, and
+instead `~/.flwr/config.toml` gets a `[superlink.<name>]` entry written
+directly (it's a plain, user-editable TOML file, not a protected format) —
+this is exactly what `tests/test_tls_auth.py`'s fixture does automatically
+via an isolated `FLWR_HOME`, and what a human operator running this stage
+manually must also do (see the exact entry format in the test fixture or in
+this stage's commit).
+
+**Real, live end-to-end validation (not mocked) — deployment engine, not
+simulation, using Stage 13/14's canonical `client_app.py`/`server_app.py`
+completely unmodified:**
+1. `scripts/generate_certs.sh` generated a local CA, SuperLink server cert,
+   and 3 hospital ECDSA-384 keypairs.
+2. `flower-superlink` started with `--enable-supernode-auth` + TLS.
+3. **Negative case confirmed manually first**: an unregistered hospital_A key
+   attempting to connect got `FAILED_PRECONDITION` / "Failed to activate
+   SuperNode" — proving auth isn't decorative.
+4. All 3 hospitals registered via `flwr supernode register`; all 3
+   `flower-supernode` processes then connected successfully.
+5. `flwr run . deployment --run-config "num-server-rounds=2"` completed 2 real
+   rounds over real TLS-encrypted, authenticated gRPC connections between 4
+   separate OS processes (not simulated actors): round 2
+   `pooled_test_auroc=0.8081`, `client_val_auroc=0.8350` — consistent with
+   the same early-round trajectory seen in every simulation-mode run this
+   session (Stages 13-15), **confirming ADR-8's claim that the same
+   ClientApp/ServerApp code runs correctly under both execution engines**,
+   validated for the first time this session.
+
+**5 new tests (119 total)**: `tests/test_tls_auth.py` (3) — a real
+subprocess-orchestrated integration suite (not mocked), isolated via the
+`FLWR_HOME` env var (which `flwr.supercore.utils.get_flwr_home` itself
+supports) so it never touches the developer's real `~/.flwr/` state:
+`test_supernode_auth_requires_tls` (the encryption-coupling claim: `--insecure`
++ `--enable-supernode-auth` together must be rejected), the negative test
+CLAUDE.md names explicitly (`test_unregistered_supernode_is_rejected`), and
+its positive counterpart (`test_registered_supernode_is_accepted`, without
+which the negative test alone can't distinguish "auth works" from "the
+SuperLink rejects everyone"). A real bug in the tests' own process-teardown
+logic was found and fixed along the way: `flower-supernode` doesn't exit
+cleanly on rejection (its "SuperExec" sidecar keeps the stdout pipe open),
+which hung a plain `subprocess.run(..., timeout=...)`/`Popen.communicate()`
+indefinitely — fixed by using `start_new_session=True` and killing the whole
+process group (`os.killpg`), not just the parent process.
+`tests/test_security.py` (2) — `src/federated/security.py` verifies Stage
+16's own testing criterion ("confirmation that the configured message length
+exceeds the actual update size") directly: the real head-only classifier
+payload (~1MB, matching Stage 13's own live-logged `ArrayRecord` sizes) sits
+comfortably under `flwr.common.GRPC_MAX_MESSAGE_LENGTH`.
+
+**Real, stale-assumption finding, corrected rather than silently worked
+around**: ADR-4's text (and this project's earlier planning notes) assume
+Flower's classic 4MB default gRPC message-size ceiling, "requiring explicit
+override." At the pinned flwr==1.35.0, **no CLI flag to override gRPC
+message size exists any more** — `flwr.common.GRPC_MAX_MESSAGE_LENGTH` is a
+hardcoded ~2GB constant with no exposed knob. This doesn't block anything
+(2GB vastly exceeds the ~1MB real payload), but the premise "must be
+explicitly configured" is stale for this pinned version — documented in
+`security.py`'s docstring and `conf/federated/tls.yaml` rather than silently
+claiming something was "configured" that has no CLI surface any more.
+
 **Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), all of Phase 2 (Stages 6–12),
-and Phase 3's Stages 13–15 are now complete.**
+and Phase 3's Stages 13–16 are now complete — the entire FL + DP + SecAgg + TLS/auth
+core (rows 1-6 of the ablation ladder are now all individually implementable).**
 
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
@@ -667,22 +774,25 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. Stage 15 is about to be committed on top of `90bf95f` (Stage 14)
-— `src/federated/{client_app_secagg,server_app_secagg}.py` (new),
-`tests/test_secagg.py` (new), `pyproject.toml`'s Stage 15 config keys
-(`num-shares`/`reconstruction-threshold`/`max-weight`), plus this file's update.
-`[tool.flwr.app.components]` was temporarily swapped to the secagg app pair for
-live validation and **has been reverted** to the canonical Stage 13/14 app —
-confirmed via `git diff pyproject.toml` before this commit. Check
-`git log --oneline -5` on resume — this file is not re-updated after every
-single commit within a session, only at natural pause points.
+**Branch:** `main`. Stage 16 is about to be committed on top of `20cc551` (Stage
+15) — `scripts/generate_certs.sh` (new), `src/federated/security.py` (new),
+`conf/federated/tls.yaml` (new), `tests/{test_tls_auth,test_security}.py`
+(new), `pyproject.toml`'s Stage 16 doc-comment (the `[tool.flwr.federations.X]`
+block that was briefly added was **removed again** — see §7's Stage 16 note
+for why; `pyproject.toml`'s only lasting change from this stage is a comment),
+plus this file's update. `certs/` was generated locally during validation and
+confirmed absent from `git status` throughout (gitignored). The manually-edited
+`~/.flwr/config.toml` entry used for live validation was reverted to its
+original state before finishing. Check `git log --oneline -5` on resume — this
+file is not re-updated after every single commit within a session, only at
+natural pause points.
 
 ```
+20cc551 Stage 15: Secure Aggregation via Flower SecAgg+ (ablation row 4)
 90bf95f Stage 14: Differential Privacy with formal accounting (ablation row 5) — DG-7 resolved
 915dae5 Stage 13: Flower FedAvg in simulation — FedAvg verified end-to-end (ablation row 3)
 f684195 Stage 12: centralized pooled baseline (ablation row 2) — Phase 2 complete
 c57ed27 Stage 11: local single-hospital baseline (ablation row 1)
-099e320 Fix: RSNA shard split (Stage 5) reused Stage 4's split seed, correlating shard membership with train/val/test membership
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -694,41 +804,56 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-**Stage 15 is complete — SecAgg+ actually masks every client's update, verified
-with a real live `flwr run` (3 rounds, natural partition), not mocks.** Every
-make-or-break/high-risk stage so far (8, 13, 14, 15) is now cleared. See §7's
-Stage 15 note for: the real API-surface finding (SecAgg+ only integrates via
-Flower's legacy Strategy/workflow API at flwr==1.35.0, requiring a fully separate
-`client_app_secagg.py`/`server_app_secagg.py` app pair rather than a config flag
-in Stage 13/14's app), the operational consequence (how to swap
-`[tool.flwr.app.components]` to actually run this ablation row, and that it's
-been reverted to the canonical app), the real `max_weight` bug found and fixed,
-the live validation numbers (round 3 `pooled_test_auroc=0.8126`, tracking Stage
-13's plain-FedAvg trajectory closely, as expected), and the "masks cancel
-exactly" test design (CLAUDE.md §11.3's own named requirement).
+**Stage 16 is complete — real TLS + Flower node authentication validated
+end-to-end in deployment mode (not simulation), using Stage 13/14's canonical
+app completely unmodified.** Every make-or-break/high-risk stage so far (8,
+13, 14, 15, 16) is now cleared, and **ADR-8's "same code, both engines" claim
+is now actually demonstrated**, not just assumed. See §7's Stage 16 note for:
+the verified mechanism (`--enable-supernode-auth` + `--auth-supernode-private-key`
++ `flwr supernode register`, ECDSA-384 OpenSSH keys — not the removed
+`--auth-list-public-keys`, not Ed25519), the real operational finding (SuperLink
+targets resolve through `~/.flwr/config.toml`'s named-connection registry, not
+`pyproject.toml`'s `[tool.flwr.federations.X]` — defining both under the same
+name breaks `flwr run` outright), the live validation (negative case rejected,
+positive case accepted, then 2 real rounds over authenticated TLS gRPC:
+round 2 `pooled_test_auroc=0.8081`), the stale-4MB-default finding for
+ADR-4's gRPC message-length text, and the process-teardown bug found while
+writing the tests (`flower-supernode`'s SuperExec sidecar keeps stdout open
+past a plain `terminate()`, requiring `os.killpg` on the whole process group).
 
-Next is **Stage 16 — TLS with client authentication** (`REQ`, **`M`-sized**,
-**ADR-4**) — mutual TLS or Flower's node-authentication with per-hospital
-key pairs, so an unregistered party can't impersonate a hospital and the
-server-only-TLS gap (server authenticates to client, but not vice versa) is
-closed. Certificate/key generation must be scripted and committed (the
-*generation script*, never the generated certs/keys themselves — CLAUDE.md is
-explicit that `certs/` stays gitignored). **The exact mechanism and flags must
-be verified against the pinned flwr==1.35.0 the same way Stage 15's SecAgg+
-surface was verified** — ADR-4 itself flags this area as having changed across
-Flower releases, and per Stage 15's finding, TLS + client auth may or may not
-compose cleanly with SecAgg+'s legacy-API app pair vs. Stage 13/14's
-Message-API app pair; this needs checking before assuming either shape,
-not assumed from either stage's precedent. This is a natural point to run in
-**deployment mode** (Docker Compose, real separate processes, real gRPC) for
-the first time, rather than simulation — worth flagging that Stage 17
-(Docker deployment) and Stage 16 may need to move together or in tight
-sequence, unlike the simulation-only stages so far.
+Next is **Stage 17 — Docker Compose multi-client deployment** (`REQ`,
+**`M`-sized**, **Decision Gate DG-9**) — the single most convincing
+demonstration artifact available: one server container and three hospital
+containers (each with its own certificate, its own mounted data shard, real
+gRPC, real TLS, real SecAgg+), reproducible via `docker compose up` from a
+clean checkout. What it needs: `docker/Dockerfile.{client,server}`,
+`docker/docker-compose.yml`, `scripts/run_deployment.sh`. Stage 16 already
+proved the underlying mechanism works outside Docker (real separate OS
+processes) — Stage 17 is primarily a packaging/networking problem
+(certificate paths and hostnames differ inside containers vs. `127.0.0.1` on
+the host; each hospital container must only be able to see its own data
+shard, not the others'), not a new protocol-correctness question. **DG-9,
+open and needing the owner's input before this stage can be scoped**: GPU
+access inside Docker needs the NVIDIA container toolkit, and three GPU
+containers won't fit in 4GB VRAM — the plan's own recommendation is CPU-only,
+few rounds, since this is a demonstration (measurements already come from
+simulation per ADR-8, fully covered by Stages 11-15's real numbers), but the
+owner should confirm this scoping rather than it being assumed silently.
 
-No new decision gate is currently known to block Stage 16. Given the project has
-now completed 8 major stages in this session (8 through 15, covering the entire
-FL + DP + SecAgg core — feature caching, the frozen backbone, both baselines,
-FedAvg, differential privacy, and secure aggregation), **a fresh check-in with
-the owner before starting Stage 16 is still warranted**, both as a natural
-phase-scope checkpoint and because Stage 16 is the first stage to leave
-simulation-only territory.
+Also worth deciding explicitly with the owner at this checkpoint (not
+blocking, but relevant to how Stage 17 is packaged): whether the demonstration
+should combine ALL layers at once (FedAvg + SecAgg + DP + TLS, CLAUDE.md's
+"full system", ablation row 6) — which would require reconciling Stage 15's
+separate legacy-API SecAgg app pair with Stage 13/14's canonical Message-API
+app plus Stage 16's TLS/auth, a real integration a Docker demo would force —
+or whether Stage 17 demonstrates FedAvg + TLS/auth only (the canonical app,
+already proven working together in this stage) and the "full system" row-6
+integration is scoped as its own later step.
+
+No new decision gate blocks *starting* Stage 17, but DG-9 blocks finishing its
+scope, and the row-6-integration question above should be raised. Given the
+project has now completed 9 major stages in this session (8 through 16 — the
+entire FL + DP + SecAgg + TLS/auth core), **a fresh check-in with the owner
+before starting Stage 17 is warranted**, both as a natural phase-scope
+checkpoint and because Docker Compose is new environment/tooling territory
+(Dockerfiles, container networking) this session hasn't touched yet.

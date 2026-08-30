@@ -567,9 +567,9 @@ touch them.
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), and Phase 3's Stages 13–15 complete — FedAvg verified working end-to-end (real 20-round run), Differential Privacy (Opacus DP-SGD, sample-level, RDP accountant) verified via two real live runs at target-epsilon 4 and 1, and Secure Aggregation (Flower SecAgg+, ADR-3) verified via a real live run with updates actually masked. TLS/client auth (Stage 16) not yet implemented. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
+| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), and Phase 3's Stages 13–16 (all of Phase 3) complete — FedAvg verified working end-to-end (real 20-round run), Differential Privacy (Opacus DP-SGD, sample-level, RDP accountant) verified via two real live runs at target-epsilon 4 and 1, Secure Aggregation (Flower SecAgg+, ADR-3) verified via a real live run with updates actually masked, and TLS + client authentication (ADR-4) verified end-to-end in deployment mode — real separate processes, real gRPC, real encrypted+authenticated channel, using the canonical Stage 13/14 app unmodified (confirms ADR-8). Docker Compose packaging (Stage 17) not yet implemented. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
 | Docker configuration | None |
-| Tests | 114 passing |
+| Tests | 119 passing |
 
 ### Resolved decisions
 
@@ -618,7 +618,29 @@ touch them.
    confirming the expected monotonic epsilon/accuracy tradeoff with real numbers. Full detail
    in `docs/SESSION_STATE.md` §7's Stage 14 note. Sweep values 2 and 8 not yet run.
 
-6. **Secure Aggregation implementation approach (resolved 2026-08-30, owner-approved).**
+6. **TLS + client authentication mechanism (resolved 2026-08-30).** Verified against
+   flwr==1.35.0's actual installed CLI, per ADR-4's own note that this area has
+   changed across releases: server TLS via `--ssl-ca-certfile`/`--ssl-certfile`/
+   `--ssl-keyfile` on `flower-superlink`; client (SuperNode) authentication via
+   `--enable-supernode-auth` (hard-requires TLS) + `--auth-supernode-private-key`
+   per SuperNode + pre-registration of the public half via `flwr supernode
+   register` — ECDSA-384 keypairs in OpenSSH format, verified against Flower's own
+   tested `framework/e2e/e2e-bare-auth/generate.sh` reference. The old
+   `--auth-list-public-keys` flag is a hard error at this version, not merely
+   deprecated. Implemented in `scripts/generate_certs.sh` (cert/key generation,
+   openssl + ssh-keygen only, no custom crypto) and `src/federated/security.py`
+   (verifies the real classifier-head payload fits well within Flower's gRPC
+   message-length ceiling — ADR-4's own text assumes a stale 4MB default that no
+   longer has any CLI override at this version). Verified with a real deployment-
+   mode `flwr run` (2 rounds, real TLS, real authenticated SuperNodes, Stage
+   13/14's canonical app unmodified — confirming ADR-8), plus a real
+   subprocess-level negative test (unregistered SuperNode rejected) and positive
+   test (registered SuperNode accepted). Full detail in `docs/SESSION_STATE.md`
+   §7's Stage 16 note, including a real operational finding: SuperLink targets
+   resolve through `~/.flwr/config.toml`'s named-connection registry, not a
+   `pyproject.toml` `[tool.flwr.federations.X]` block.
+
+7. **Secure Aggregation implementation approach (resolved 2026-08-30, owner-approved).**
    At the pinned `flwr==1.35.0`, Flower's SecAgg+ (`SecAggPlusWorkflow`) is only wired
    through Flower's legacy `Strategy`/`ClientManager`/`workflow` API, not the new
    Message-API `strategy.start()` loop Stages 13–14 use — verified against the installed
@@ -637,6 +659,17 @@ touch them.
    resolved by DG-3 (client count of 3 for the natural regime); still open for the
    Dirichlet synthetic sweep's client count and which regime is the paper's primary
    headline vs. secondary comparison.
+2. **Decision Gate DG-9 (Stage 17 demonstration scope)**: GPU access inside Docker
+   needs the NVIDIA container toolkit, and three GPU containers won't fit in 4GB
+   VRAM. The plan's own recommendation is CPU-only, few rounds (a demonstration,
+   not a measurement — real numbers already come from simulation, Stages 11-15).
+   Needs owner confirmation before Stage 17 is scoped.
+3. **Whether the Stage 17 Docker demonstration combines every layer at once**
+   (FedAvg + SecAgg + DP + TLS, ablation row 6) — which requires reconciling
+   Stage 15's separate legacy-API SecAgg app pair with Stage 13/14's canonical
+   Message-API app plus Stage 16's TLS/auth — **or** demonstrates FedAvg + TLS/auth
+   only (already proven working together) with row-6 integration scoped
+   separately later. Not yet raised for a decision.
 
 ---
 
