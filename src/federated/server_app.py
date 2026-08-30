@@ -55,6 +55,20 @@ def main(grid: Grid, context: Context) -> None:
     fraction_evaluate = float(context.run_config["fraction-evaluate"])
     seed = int(context.run_config["seed"])
 
+    dp_enabled = bool(context.run_config.get("dp-enabled", False))
+    if dp_enabled:
+        print(
+            f"Differential Privacy ENABLED (Stage 14, ADR-2): "
+            f"target_epsilon={context.run_config['target-epsilon']}, "
+            f"target_delta={context.run_config['target-delta']}, "
+            f"max_grad_norm={context.run_config['max-grad-norm']}. "
+            f"Per-client noise_multiplier is calibrated to each hospital's own "
+            f"dataset size — see client-reported 'noise_multiplier' and "
+            f"'epsilon_spent' in the aggregated train metrics below."
+        )
+    else:
+        print("Differential Privacy disabled (Stage 13's plain FedAvg path).")
+
     torch.manual_seed(seed)
     global_model = DenseNet121Head()
     initial_arrays = classifier_state_to_array_record(global_model.classifier.state_dict())

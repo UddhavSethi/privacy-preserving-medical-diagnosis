@@ -567,9 +567,9 @@ touch them.
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), and Phase 3's Stage 13 complete — FedAvg verified working end-to-end (real 20-round run) with no privacy layers yet. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
+| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), and Phase 3's Stages 13–14 complete — FedAvg verified working end-to-end (real 20-round run), and Differential Privacy (Opacus DP-SGD, sample-level, RDP accountant) verified via two real live runs at target-epsilon 4 and 1. Secure Aggregation and TLS/client auth (Stages 15–16) not yet implemented. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
 | Docker configuration | None |
-| Tests | 101 passing |
+| Tests | 111 passing |
 
 ### Resolved decisions
 
@@ -605,10 +605,22 @@ touch them.
    19) will only capture last-layer uncertainty, not backbone-level uncertainty. See
    `src/models/densenet_head.py`.
 
+5. **Decision Gate DG-7 — target epsilon values and delta (resolved 2026-08-29).** Delta =
+   1e-5 (well below 1/N for every hospital — the smallest, Hospital A, has N=4,180 train
+   examples, so 1/N ≈ 2.4e-4 >> 1e-5). Target-epsilon sweep = {1, 2, 4, 8}, with 4 (the
+   sweep's midpoint) as `pyproject.toml`'s `[tool.flwr.app.config]` default. Implemented in
+   `src/privacy/{dp,accounting}.py` (Opacus DP-SGD, per-sample clipping + calibrated Gaussian
+   noise, RDP accountant) and wired into `src/federated/client_app.py` as a config-switchable
+   layer (`dp-enabled`, default `false` — Stage 13's DP-free FedAvg path is unaffected).
+   Verified via two real live `flwr run` executions: at target-epsilon=4, round-5
+   `pooled_test_auroc=0.8152` vs. Stage 13's no-DP `0.8182` (minimal cost); at
+   target-epsilon=1, round-5 `pooled_test_auroc=0.8022` (larger, still moderate cost) —
+   confirming the expected monotonic epsilon/accuracy tradeoff with real numbers. Full detail
+   in `docs/SESSION_STATE.md` §7's Stage 14 note. Sweep values 2 and 8 not yet run.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
-1. **Target epsilon values** for the DP sweep, and delta relative to dataset size.
-2. **Client count** and default partition scheme for the headline results — partially
+1. **Client count** and default partition scheme for the headline results — partially
    resolved by DG-3 (client count of 3 for the natural regime); still open for the
    Dirichlet synthetic sweep's client count and which regime is the paper's primary
    headline vs. secondary comparison.
