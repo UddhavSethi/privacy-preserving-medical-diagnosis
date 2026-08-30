@@ -1,12 +1,18 @@
 [project]
-name = "privacy-preserving-medical-diagnosis"
+# Shortened from "privacy-preserving-medical-diagnosis" (37 chars) — Flower's
+# [tool.flwr.app] validator hard-requires [project].name to be <=32 chars (it's
+# reused as the Flower App name), with no override available. Purely cosmetic: this
+# name isn't imported anywhere (all imports go through `src.*`) and doesn't affect
+# the project's stated identity in CLAUDE.md or the repo name. Matches the MLflow
+# experiment_name already used in conf/config.yaml.
+name = "pneumonia-fl"
 version = "0.1.0"
 description = "Privacy-preserving pneumonia detection via federated learning, differential privacy and secure aggregation"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "torch==2.13.0",
     "torchvision==0.28.0",
-    "flwr==1.35.0",
+    "flwr[simulation]==1.35.0",
     "opacus==1.6.0",
     "opencv-python-headless==5.0.0.93",
     "hydra-core==1.3.5",
@@ -44,3 +50,45 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+[tool.flwr.app]
+publisher = "uddhavsethi"
+# fab-format-version intentionally omitted (defaults to 0) — version 1 requires a
+# declared [project].license file, and picking a real license is a project-owner
+# decision outside this stage's scope, not something to invent unilaterally to
+# satisfy a local CLI validator.
+flwr-version-target = "1.35.0"
+# Positive allowlist rather than relying on excludes: the FAB bundle only needs the
+# source code + pyproject.toml. Excludes alone weren't sufficient — .venv's installed
+# packages (torch, pandas, mlflow, etc. ship some very large .py/.json/.yaml files,
+# ~350MB total) and data/*.json (partition files, several MB each) both matched
+# Flower's default *.py/*.json/etc. include patterns and pushed the bundle over the
+# 10MB FAB limit. (Must be a direct key of [tool.flwr.app], not nested under
+# [tool.flwr.app.components] — a misplacement that silently no-opped the first time.)
+fab-include = ["src/**/*.py", "pyproject.toml"]
+
+[tool.flwr.app.components]
+serverapp = "src.federated.server_app:app"
+clientapp = "src.federated.client_app:app"
+
+[tool.flwr.app.config]
+# Stage 13 — FedAvg, no privacy layers. Mirrored (documentation-only) in
+# conf/federated/fedavg.yaml; this section is what `flwr run` actually reads.
+#
+# partition-path / feature-cache-dir / output-checkpoint are ABSOLUTE paths,
+# deliberately, not relative — Flower's simulation runtime copies the app's source
+# into an isolated directory (~/.flwr/apps/...) and executes it from there, so a
+# relative path (or a Path(__file__)-derived "repo root", as other scripts in this
+# project use) silently resolves against the wrong directory. This is a known,
+# machine-specific limitation of running Stage 13 via `flwr run` locally; Stage 17's
+# deployment engine is a different execution mode with its own config and will need
+# its own path handling, not this one.
+partition-path = "/mnt/storage/pneumonia-detection/data/partitions/hospitals_natural.json"
+feature-cache-dir = "/mnt/storage/pneumonia-detection/data/feature_cache"
+output-checkpoint = "/mnt/storage/pneumonia-detection/outputs/checkpoints/federated/fedavg_final.pt"
+num-server-rounds = 20
+local-epochs = 1
+learning-rate = 0.001
+batch-size = 32
+fraction-evaluate = 1.0
+seed = 42

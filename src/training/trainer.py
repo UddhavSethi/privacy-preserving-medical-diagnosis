@@ -207,3 +207,57 @@ def evaluate_classifier(
     with torch.no_grad():
         probs = F.softmax(model.classifier(test_features.to(device)), dim=1)[:, 1].cpu().numpy()
     return compute_metrics(test_labels.numpy(), probs).to_dict()
+
+
+def train_local_round(
+    model: DenseNet121Head,
+    train_features: torch.Tensor,  # (N, V, 1024)
+    train_labels: torch.Tensor,  # (N,)
+    seed: int,
+    local_epochs: int,
+    lr: float,
+    batch_size: int,
+) -> dict:
+    """A fixed-epoch-count local training round (Stage 13's federated client `fit`).
+
+    Unlike `train_classifier`'s train-to-convergence-with-early-stopping loop (Stages
+    11/12, a single non-federated run), this matches the federated-round paradigm: a
+    few local epochs starting from the server-provided global classifier state
+    (`model.classifier` is mutated in place — caller loads the received state before
+    calling this), then the caller sends the updated state back to the server.
+
+    Seeds the global torch RNG (not just a local Generator) because the classifier's
+    Dropout layer draws its mask from the global RNG, not from a passed-in generator —
+    a local Generator alone reproducibly controls shuffle/view-selection order but
+    silently leaves Dropout's randomness ambient. Matches how `train_classifier`
+    (Stages 11/12) achieves full reproducibility via `set_global_seed`.
+    """
+    torch.manual_seed(seed)
+    generator = torch.Generator().manual_seed(seed)
+    class_weights = compute_class_weights(train_labels)
+    opt = torch.optim.Adam(model.classifier.parameters(), lr=lr)
+
+    n = train_features.shape[0]
+    num_views = train_features.shape[1]
+    model.train()
+    total_loss = 0.0
+    for _ in range(local_epochs):
+        perm = torch.randperm(n, generator=generator)
+        for start in range(0, n, batch_size):
+            batch_idx = perm[start : start + batch_size]
+            view_idx = torch.randint(0, num_views, (len(batch_idx),), generator=generator)
+            x = train_features[batch_idx, view_idx]
+            y = train_labels[batch_idx]
+            out = model.classifier(x)
+            loss = F.cross_entropy(out, y, weight=class_weights)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+            total_loss += loss.item() * len(batch_idx)
+
+    avg_loss = total_loss / (n * local_epochs)
+    return {
+        "classifier_state": {k: v.clone() for k, v in model.classifier.state_dict().items()},
+        "num_examples": n,
+        "train_loss": avg_loss,
+    }
