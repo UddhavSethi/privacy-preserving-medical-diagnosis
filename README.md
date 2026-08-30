@@ -56,6 +56,7 @@ dataset, and why.
 | `docs/SESSION_STATE.md` | Detailed, per-stage development log and continuity notes |
 | `docs/threat_model.md` | Threat actors, protection layers, known architectural tensions |
 | `docs/results.md` | The ablation table, figures, and interpretation |
+| `docs/calibration.md` | OPT-1: ECE, Brier score, and risk-coverage analysis of MC Dropout confidence |
 | `docs/reproducibility.md` | How every reported number traces to a config/seed/MLflow run |
 | `Review_1_Privacy_Preserving_FL_Diagnosis.pptx` | Original project proposal (do not modify) |
 
