@@ -1217,6 +1217,75 @@ separate explicit go-ahead** — do not start building either just because they'
 documented. Earliest they could start: OPT-5 after Stage 11 (needs a trained model);
 OPT-6 after Stages 11/18/19 (needs a trained model, Grad-CAM, and MC Dropout).
 
+**Stage 23 (`README.md` rewrite, `docs/threat_model.md`, `docs/results.md`,
+`docs/reproducibility.md`, `docs/figures/*.png`, `scripts/generate_result_figures.py`)
+— documentation and reproducibility package. Executed under the owner's
+2026-08-30 "next 3 stages" autonomy grant (§10).**
+
+Two real bugs surfaced and fixed while writing this documentation from the
+Stage 21 campaign's actual data (not from memory or assumption):
+1. **Row-labeling ambiguity** — `src/evaluation/tables.py`'s rows 1-2 used
+   the same label ("1. Local (per-hospital, averaged)") for both the
+   natural and balanced regimes, making the generated bar chart show two
+   indistinguishable bars per row. Fixed by including the regime name in
+   the label string.
+2. **MLflow contamination by `tests/test_integration_smoke.py` (real data
+   integrity bug, not just a labeling issue)** — the Stage 22 smoke test
+   invokes a real `flwr run` but never overrode `mlflow-tracking-uri`,
+   so every run of the test (including any future `pytest tests/` or CI
+   invocation) silently wrote an extra "fedavg_natural_seed42" run into
+   the *real* `mlruns.db`. `src/evaluation/tables.py::query_fedavg_row()`
+   filters by `partition_path`/`dp_enabled` params only (not by seed
+   identity or run count), so each stray run got folded into the "3.
+   FedAvg (natural)" row's seed aggregation — caught when regenerating
+   `docs/figures/ablation_table_chart.png` showed `n_seeds: 6` instead of
+   3 and a diluted mean (0.8096 vs. the real 0.8144). Root-caused to 3
+   specific stray runs (by timestamp + a distinctive ~0.8048 AUROC value
+   matching a 1-round result, not the real 20-round campaign's ~0.827),
+   deleted directly via `MlflowClient.delete_run()`, then fixed at the
+   source by redirecting the test's `mlflow-tracking-uri` to an isolated
+   `tmp_path` sqlite file. Verified via a real re-run of the fixed test
+   (passes, 36.8s) plus a direct MLflow query confirming exactly one
+   "fedavg_natural_seed42" run remains. Documented in detail in
+   `docs/reproducibility.md`'s closing section, deliberately, as an
+   example of the exact silent-corruption failure mode CLAUDE.md §12's
+   reproducibility discipline exists to catch.
+
+Both fixes committed together (`7427bfd`) with the regenerated,
+now-correct `docs/figures/*.png`. Full suite re-verified after the fix:
+145/145 passing.
+
+**Documentation content** (`README.md`, `docs/threat_model.md`,
+`docs/results.md`, `docs/reproducibility.md`) written directly from real
+sources — `outputs/results/{local,centralized}_baseline.json` for rows
+1-2, live MLflow queries via `src.evaluation.tables` for rows 3-5 and the
+Dirichlet supplement, and a direct MLflow metrics query
+(`payload_bytes`/`wall_clock_seconds`) for the overhead section. One
+honest finding surfaced while writing the results interpretation (not
+smoothed over): row 3 (FedAvg, natural, 0.8144) does **not** clear row 1
+(Local average, natural, 0.8924) in this dataset — the "federation beats
+any single hospital" framing CLAUDE.md §11.1 names as the most persuasive
+available result does not hold here, most plausibly because DG-2's RSNA
+label harmonization gives hospitals B/C a different decision boundary
+than Kermany-only hospital A. `docs/results.md` states this directly
+rather than omitting the comparison.
+
+**Architecture diagram**: no new image was created — the existing ASCII
+diagram (already in `CLAUDE.md` §3.1) is mirrored into `README.md`'s
+"Architecture at a glance" section, consistent with the project's
+plain-text documentation style throughout; a separate rendered image was
+judged unnecessary scope, not a shortcut.
+
+**Not yet done (by design, pending owner approval, not an oversight)**:
+the plan's own item 9 for this stage ("Architecture change? Yes... CLAUDE.md
+section 14 status and section 15 limitations require updating... Proposed
+for approval, not applied unilaterally") — CLAUDE.md itself has NOT been
+edited. A proposed diff (updating §14's status table, top-of-section
+summary line, and resolved-decisions list to reflect Stages 15-23 being
+complete) was prepared and presented to the owner as a proposal, per
+CLAUDE.md's own unconditional governance rule, which the Stage 21-23
+autonomy grant does not override (see §10, §11).
+
 ## 8. Pending decisions / open decision gates
 
 - **DG-2 (label harmonization): RESOLVED and applied**, see §4.
@@ -1237,8 +1306,13 @@ OPT-6 after Stages 11/18/19 (needs a trained model, Grad-CAM, and MC Dropout).
   rounds; FedAvg+TLS/auth only. See §7's Stage 17 note.
 - **DG-10 (Stage 19 MC Dropout deferral policy): RESOLVED 2026-08-30** — fixed coverage
   target, defer worst 10% by predictive entropy. See §7's Stage 19 note.
-- **Client count** / default partition scheme for headline results (needed at Stage 5):
-  open, related to DG-3.
+- **Client count / default partition scheme for headline results (needed at Stage
+  5): RESOLVED by execution, Stage 21, 2026-08-30** — the owner's Stage 21 scoping
+  answers fixed the Dirichlet sweep at 3 clients (matching the natural/balanced
+  regimes) and alpha in {0.1, 1.0}, labeled "supplementary" rather than a
+  co-headline regime in `docs/results.md`; natural and balanced are both treated
+  as primary (per DG-3's "report both" resolution), with no further ranking
+  between them requested or made.
 
 No dependency, architecture, or technology-stack changes are currently awaiting
 approval — the last one (adding `requests`) was resolved and committed in Stage 3.
@@ -1294,19 +1368,21 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. Stage 22 is about to be committed on top of `a1951bf`
-(Stage 21) — `tests/test_integration_smoke.py` (new),
-`.github/workflows/tests.yml` (new), plus this file's update. No source
-code changes, no new dependencies. Check `git log --oneline -5` on resume —
-this file is not re-updated after every single commit within a session,
-only at natural pause points.
+**Branch:** `main`. Stage 23's doc fixes are committed as `7427bfd` (on top of
+the Stage 22 commit, itself on top of `a1951bf` Stage 21). Stage 23's remaining
+content (`README.md`, `docs/threat_model.md`, `docs/results.md`,
+`docs/reproducibility.md`, this file's own update) is about to be committed as
+a separate commit — check `git log --oneline -5` on resume. **CLAUDE.md itself
+has NOT been edited** — a proposed diff was prepared and shown to the owner per
+CLAUDE.md's own governance rule (see §11); do not apply it without a separate
+explicit approval, even under the Stage 21-23 autonomy grant.
 
 ```
+7427bfd Stage 23: fix ablation-table row labeling and smoke-test MLflow contamination
+1f5c09c Stage 22: integration smoke test + optional CI workflow
 a1951bf Stage 21: Full ablation campaign — 27/27 real live runs, complete results table
 d55697f Stage 20: Overhead instrumentation — DP and SecAgg overhead attributed separately
 f6256a2 Stage 19: Monte Carlo Dropout and deferral (DG-10 resolved) — Phase 4 complete
-9fcc8af Stage 18: Grad-CAM explainability
-3ece93a Stage 17: Docker Compose multi-client deployment
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -1358,19 +1434,37 @@ Stage 17's own CPU-torch-install lesson rather than re-discovering it in CI.
 145/145 tests passing. No `tests/conftest.py` — audited for genuine fixture
 duplication first and found none needing consolidation.
 
-Next is **Stage 23 — documentation and reproducibility package** (`REQ`,
-**`M`-sized**) — a full README, threat model write-up (CLAUDE.md §6),
-limitations (§15), results documentation (this session's real ablation
-table from Stage 21), an architecture diagram, and a *proposed* CLAUDE.md
-status update. **Important governance note, binding regardless of the
-Stage 21-23 autonomy grant**: Stage 23's own plan text says "Architecture
-change? Yes... Proposed for approval, not applied unilaterally" — CLAUDE.md
-itself requires propose→explain→show→ask→approve for any edit to itself,
-and the broad autonomy grant does not override that specific, explicit
-governance rule (CLAUDE.md's own opening lines: "Do NOT modify this file
-automatically"). Implement everything else in Stage 23 directly (README,
-docs/threat_model.md, docs/results.md, docs/reproducibility.md,
-docs/figures/), but the CLAUDE.md diff itself must be shown to the owner
-and approved before being applied, not committed as part of autonomous
-work — this is the one place in Stages 21-23 where the grant does not mean
-"just do it."
+**Stage 23 is complete.** `README.md` rewritten (was severely stale — still
+said "Phase 0 complete, no modeling/FL code yet" despite Stages 0-22 being
+done); `docs/threat_model.md` (CLAUDE.md §6 write-up plus the local-vs-
+distributed-DP honest limitation and the ADR-1/DP-compatibility link),
+`docs/results.md` (the real Stage 21 ablation table, figures, and an honest
+interpretation including the row-1-vs-row-3 counter-finding), and
+`docs/reproducibility.md` (how every number traces to config/seed/MLflow
+run, plus the MLflow-contamination bug as a worked example of the exact
+failure mode this discipline exists to catch) are all written. Two real
+bugs found and fixed while writing this documentation from actual data are
+recorded in this file's §7 Stage 23 note and in `docs/reproducibility.md`'s
+closing section. Architecture diagram: the existing ASCII diagram (already
+in CLAUDE.md §3.1) mirrored into README rather than a new rendered image —
+judged sufficient, not a shortcut, given the project's plain-text
+documentation style throughout.
+
+**CLAUDE.md itself has NOT been edited** — per the plan's own item 9 ("Yes...
+Proposed for approval, not applied unilaterally") and CLAUDE.md's own
+unconditional governance rule, which the Stage 21-23 autonomy grant does not
+override. A proposed diff to §14 (status table, top summary line, and
+resolved-decisions list, reflecting Stages 15-23 now complete) was drafted
+and presented to the owner as a proposal in-conversation. **If you are
+resuming this session and that proposal has not yet been answered, that is
+the first thing to check on — do not apply it unilaterally, and do not
+re-draft it from scratch without first checking whether the owner already
+responded.**
+
+**The Stage 21-23 autonomy grant is now exhausted.** All three stages it
+named are done. A session resuming from here should **not** assume
+continued blanket autonomy for anything further — the CLAUDE.md proposal
+above needs an explicit answer, and anything beyond Stage 23 (Phase 6's
+optional extensions OPT-1 through OPT-6, further campaign work, a push to
+`origin` if one hasn't happened yet, etc.) needs a fresh check-in with the
+owner, per this file's own repeated note in §10 and §7's Stage 21 entry.
