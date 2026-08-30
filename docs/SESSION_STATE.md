@@ -1468,3 +1468,48 @@ above needs an explicit answer, and anything beyond Stage 23 (Phase 6's
 optional extensions OPT-1 through OPT-6, further campaign work, a push to
 `origin` if one hasn't happened yet, etc.) needs a fresh check-in with the
 owner, per this file's own repeated note in §10 and §7's Stage 21 entry.
+
+**Update, later same session:** the CLAUDE.md proposal above WAS answered
+("go ahead") and applied (two small commits, `028b2ac` + `2d09223` — status
+table only, no architecture change). The owner then explicitly requested a
+full Phase 6 prioritization review (all 6 OPT extensions evaluated for
+research value, effort, risk, overlap, essential/recommended/optional/
+unnecessary), which was produced and presented (research-first ordering:
+OPT-1, OPT-2, OPT-3, OPT-4 conditional-on-OPT-1, OPT-5, with OPT-6 held
+back for a separate discussion). The owner approved: **"ok follow the
+order and implement everything till opt 5 we will discuss streamlit
+deployement after that."** This is a fresh, explicit autonomy grant
+covering OPT-1 through OPT-5 specifically (not OPT-6/Streamlit, which
+stays gated behind a separate discussion, and which also needs the
+standard new-dependency approval for `streamlit` regardless).
+
+## 12. Phase 6 — optional research extensions (owner-approved 2026-08-30: OPT-1 through OPT-5, in that order)
+
+**OPT-1 — Calibration metrics: complete.** `src/evaluation/calibration.py`
+(ECE, Brier score, reliability-diagram data, risk-coverage curve — see its
+own module docstring for the exact conventions chosen, e.g. Guo et
+al.-style max-probability confidence, not sklearn's positive-class
+`calibration_curve` convention), `tests/test_calibration.py` (11 tests,
+hand-computed known-answer cases, not just shape checks),
+`scripts/run_calibration_analysis.py` (post-hoc analysis over Stage 21's
+already-trained checkpoints — no new training), `docs/calibration.md`,
+three new figures in `docs/figures/`.
+
+Real findings, not assumed: MC Dropout confidence is reasonably calibrated
+without DP (ECE ~0.02-0.03 for centralized/FedAvg/SecAgg) — the "known-weak,
+possibly poorly calibrated" concern CLAUDE.md §10 names is NOT borne out
+here. But DP causes a large, real, one-time calibration cost (ECE roughly
+quadruples to ~0.09-0.10 the moment DP is on) that is **roughly flat across
+the epsilon sweep** {1,2,4,8} rather than smoothly worsening as epsilon
+tightens — an honest counter-finding (calibration damage and accuracy
+damage move by different mechanisms under DP, not together, since the
+ablation table's own AUROC-vs-epsilon curve IS cleanly monotonic).
+Separately, risk-coverage curves confirm DG-10's single-operating-point
+finding (Stage 19) generalizes across the full coverage range for every
+configuration including the DP sweep — the deferral mechanism's *ranking*
+of predictions by trustworthiness remains sound even where DP damages the
+raw confidence number's calibration. 156/156 tests passing after this
+addition (145 + 11 new).
+
+No new dependency, no architecture change — pure post-hoc analysis over
+already-saved checkpoints (matplotlib, numpy, sklearn all already pinned).
