@@ -141,3 +141,17 @@ max-weight = 20000
 # note for the exact entry), and after registering each hospital's public
 # key (`flwr supernode register certs/hospital_A.pub deployment`, etc.)
 # against a SuperLink started with `--enable-supernode-auth` + TLS.
+
+# Stage 21 — MLflow tracking for federated runs (CLAUDE.md section 12: "a result
+# that is not in MLflow does not exist"). Must be an ABSOLUTE sqlite path — Flower's
+# simulation runtime executes server_app.py from an isolated copy of the app
+# (~/.flwr/apps/<hash>/), so a relative path here would silently create a
+# disconnected mlruns.db there instead of the project's real one. Set by default so
+# every `flwr run` from here on is tracked automatically, not just Stage 21's
+# campaign runs — server_app.py treats it as fully optional (`nullcontext` if unset)
+# purely so a future run can still disable it via `--run-config` if ever needed.
+# The per-run name (not a config key — see server_app.py's own comment on why)
+# is derived from seed/dp/epsilon/partition-path, which scripts/run_ablation.py
+# already varies per invocation via --run-config overrides.
+mlflow-tracking-uri = "sqlite:////mnt/storage/pneumonia-detection/mlruns.db"
+mlflow-experiment-name = "federated_ablation"

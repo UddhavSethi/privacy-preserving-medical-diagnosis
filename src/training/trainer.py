@@ -13,6 +13,7 @@ this kind of imbalance.
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,26 +52,58 @@ def load_hospital_features(
 ) -> HospitalFeatures:
     """Load one hospital's cached features for train/val/test, filtered from the
     relevant source's full feature bank by patient_id membership (a hospital may be
-    only a patient-disjoint shard of a source, e.g. Hospitals B/C are RSNA shards)."""
+    only a patient-disjoint shard of a source, e.g. Hospitals B/C are RSNA shards).
+
+    Multi-source hospitals (Stage 21: Dirichlet-partitioned synthetic clients pool
+    both Kermany and RSNA before assigning patients to clients, so a single
+    "hospital" can span both sources) are handled by grouping per (source, split)
+    and concatenating across sources for the same split — gathering from only
+    `hospital_records[0]["source"]`, as an earlier single-source-only version of
+    this function did, would silently drop every record from the other source for
+    a mixed-source client. Natural/balanced hospitals (always single-source) are
+    unaffected — this is a strict generalization, not a behavior change for them.
+    """
     partition = json.loads(partition_path.read_text())
     hospital_records = partition["hospitals"][hospital]
     if not hospital_records:
         raise ValueError(f"No records for hospital {hospital} in {partition_path}")
-    source = hospital_records[0]["source"]
 
-    by_split: dict[str, list[str]] = {"train": [], "val": [], "test": []}
+    by_split_source: dict[str, dict[str, list[str]]] = {
+        "train": defaultdict(list),
+        "val": defaultdict(list),
+        "test": defaultdict(list),
+    }
     for r in hospital_records:
-        by_split[r["frozen_split"]].append(r["patient_id"])
+        by_split_source[r["frozen_split"]][r["source"]].append(r["patient_id"])
 
     def _gather(split: str, all_views: bool):
-        bank_path = cache_file_path(feature_cache_dir, source, split, FEATURE_KEY)
-        bank = load_feature_bank(bank_path)
-        id_to_idx = {rid: i for i, rid in enumerate(bank["record_ids"])}
-        idx = [id_to_idx[pid] for pid in by_split[split] if pid in id_to_idx]
-        feats = bank["features"][idx]  # (n, V, 1024)
-        labels = torch.tensor([bank["labels"][i] for i in idx])
-        if not all_views:
-            feats = feats[:, -1, :]  # the eval-style view is always the last index
+        feats_by_source = []
+        labels_by_source = []
+        for source, patient_ids in sorted(by_split_source[split].items()):
+            bank_path = cache_file_path(feature_cache_dir, source, split, FEATURE_KEY)
+            bank = load_feature_bank(bank_path)
+            id_to_idx = {rid: i for i, rid in enumerate(bank["record_ids"])}
+            idx = [id_to_idx[pid] for pid in patient_ids if pid in id_to_idx]
+            if not idx:
+                continue
+            source_feats = bank["features"][idx]  # (n, V, 1024)
+            source_labels = torch.tensor([bank["labels"][i] for i in idx])
+            if not all_views:
+                source_feats = source_feats[:, -1, :]  # eval-style view is always the last index
+            feats_by_source.append(source_feats)
+            labels_by_source.append(source_labels)
+        if not feats_by_source:
+            # No records for this split at all (e.g. a degenerate/tiny partition) —
+            # match the original single-source function's behavior of returning a
+            # correctly-shaped empty tensor rather than crashing, so a hospital with
+            # zero val/test examples for a given split fails downstream (e.g. an
+            # AUROC computation on empty labels) exactly where it always did, not
+            # here with an unrelated torch.cat error.
+            num_views = FEATURE_KEY.num_augmented_views + 1
+            shape = (0, num_views, 1024) if all_views else (0, 1024)
+            return torch.empty(shape), torch.empty(0, dtype=torch.long)
+        feats = torch.cat(feats_by_source, dim=0)
+        labels = torch.cat(labels_by_source, dim=0)
         return feats, labels
 
     train_features, train_labels = _gather("train", all_views=True)

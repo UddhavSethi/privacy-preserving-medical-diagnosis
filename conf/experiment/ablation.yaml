@@ -1,0 +1,59 @@
+# Stage 21 — full ablation campaign (CLAUDE.md section 11.1: "the ablation table
+# is the paper"). Documentation mirror of scripts/run_ablation.py's actual
+# constants — nothing loads this file via Hydra (matches this project's
+# convention for infra/reporting-style stages, e.g. Stage 16's
+# conf/federated/tls.yaml), kept alongside every other stage's config for
+# discoverability. If the two ever drift, scripts/run_ablation.py is authoritative
+# (it's what actually runs).
+
+# All choices below owner-approved 2026-08-30.
+seeds: [42, 123, 2024] # reused from Stages 11/12's own precedent
+num_server_rounds: 20 # reused from Stage 13's own precedent; Stage 20's real
+  # timing showed this is affordable even for the DP rows (~16.7x slower per round)
+
+rows:
+  # Rows 1-2: NOT re-run — real results already exist from Stages 11/12
+  # (outputs/results/{local,centralized}_baseline.json).
+  row_1_local: { source: "outputs/results/local_baseline.json", regimes: [natural, balanced] }
+  row_2_centralized: { source: "outputs/results/centralized_baseline.json", regimes: [natural, balanced] }
+
+  row_3_fedavg:
+    regimes: [natural, balanced]
+    seeds: [42, 123, 2024]
+
+  row_4_secagg:
+    regime: natural # SecAgg's separate legacy-API app pair (Stage 15) was only
+      # ever wired for the natural regime
+    seeds: [42, 123, 2024]
+    note: "Uses src/federated/{client_app_secagg,server_app_secagg}.py — requires
+      temporarily swapping pyproject.toml's [tool.flwr.app.components], which
+      scripts/run_ablation.py does automatically and reverts on completion."
+
+  row_5_dp:
+    regime: natural
+    target_epsilon_sweep: [1.0, 2.0, 4.0, 8.0] # DG-7's resolved sweep
+    target_delta: 0.00001
+    seeds: [42, 123, 2024]
+
+  row_6_full_system:
+    status: "DEFERRED — not part of this campaign (owner-approved 2026-08-30)"
+    reason: "Requires real integration work: reconciling Stage 15's separate
+      legacy-API SecAgg app with the canonical Message-API app plus DP, which
+      has not been built. Scoped as its own later step."
+
+dirichlet_supplementary:
+  status: "Supplementary to the 6 official ablation rows, not one of them —
+    CLAUDE.md's own framing: natural non-IID is preferred, Dirichlet is
+    'a controlled sweep.'"
+  alphas: [0.1, 1.0] # strong vs. mild synthetic heterogeneity
+  num_clients: 3 # matches the natural/balanced regimes' client count for
+    # direct comparability
+  seeds: [42, 123, 2024]
+  partition_files:
+    - data/partitions/hospitals_dirichlet_alpha0.1.json
+    - data/partitions/hospitals_dirichlet_alpha1.0.json
+
+tracking:
+  mlflow_experiment: federated_ablation
+  mlflow_tracking_uri: sqlite:////mnt/storage/pneumonia-detection/mlruns.db
+  aggregation: src/evaluation/tables.py::build_ablation_table
