@@ -166,7 +166,8 @@ re-asserted by a dedicated test against the live files).
 | 11 — Local single-hospital baseline (ablation row 1) | **Done.** 94/94 tests passing (8 new + 1 partitioning regression test). Real results below — no architecture concerns triggered. | `c57ed27` |
 | 12 — Centralized pooled baseline (ablation row 2) | **Done.** 97/97 tests passing (3 new). Centralized model matched/exceeded every local baseline — all [OK]. See note below the table. | `f684195` |
 | 13 — Flower FedAvg in simulation (ablation row 3) | **Done — real 20-round FedAvg run completed end-to-end.** 101/101 tests passing (4 new). No privacy layers yet (by design — DP/SecAgg/TLS come next). Several real Flower-tooling issues hit and fixed; see note below the table. | (pending commit this session) |
-| 14–23 | Not started | — |
+| 14 — Differential Privacy with formal accounting (ablation row 5) | **Done — DG-7 resolved and applied.** Opacus DP-SGD wired into `client_app.py` as a config-switchable layer (`dp-enabled`, default `false`; Stage 13's no-DP path untouched). 111/111 tests passing (10 new). Two real live `flwr run` DP runs at epsilon=4 and epsilon=1, confirming the expected privacy-utility tradeoff. See note below the table. | (pending commit this session) |
+| 15–23 | Not started | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -387,8 +388,100 @@ the kind of API churn ADR-5 warned about, worth knowing before touching Stages 1
    execution — Stage 17's deployment engine is a different execution mode and will
    need its own path handling.
 
+**Stage 14 (`src/privacy/{dp,accounting}.py`, `src/federated/client_app.py`,
+`src/federated/server_app.py`, `pyproject.toml`'s `[tool.flwr.app.config]`
+DP keys) — sample-level DP-SGD (ADR-2), config-switchable, verified with two real
+live `flwr run` executions, not just unit tests.**
+
+**DG-7 resolved 2026-08-29 (owner-approved):** delta = 1e-5 (well below 1/N for
+every hospital — the smallest, Hospital A, has N=4,180 train, so 1/N ≈ 2.4e-4 >>
+1e-5); target-epsilon sweep = {1, 2, 4, 8}, with 4 (the sweep's midpoint) set as
+`pyproject.toml`'s config default. Recorded in `pyproject.toml`'s `[tool.flwr.app.config]`
+comment block and in CLAUDE.md.
+
+**Design:** DP is a config-switchable layer, not a fork of Stage 13's client logic.
+`dp-enabled` (default `false`) selects between Stage 13's original path
+(`train_local_round` — plain Adam, cycles through K=5 augmented + 1 eval view) and
+the new DP path (`train_local_round_dp` — Opacus `PrivacyEngine.make_private()`,
+trained on the deterministic eval-style view only, since Opacus's Poisson-sampling
+DataLoader — required for its accounting to be valid — doesn't compose simply with
+"a different random augmented view per epoch"). A `PrivacyEngine` instance is cached
+per hospital (`_privacy_engine_cache` in `client_app.py`) and reused across every
+round that hospital participates in — required for the accountant's spent-epsilon to
+accumulate correctly rather than resetting each round (the stage's own flagged risk,
+directly tested — see below). Per-client noise multiplier is calibrated once from
+that client's own dataset size via `src/privacy/accounting.py::compute_noise_multiplier`
+(Opacus's `get_noise_multiplier`, RDP accountant, given target epsilon/delta, sample
+rate, and total training steps across all rounds).
+
+**Real bugs found and fixed while implementing this stage (not found by inspection —
+found via failing tests or a live run):**
+1. **Accountant-type mismatch**: `compute_noise_multiplier()` explicitly used
+   `accountant="rdp"`, but a bare `PrivacyEngine()` call defaults to `"prv"` — noise
+   would have been calibrated for one accounting method while epsilon was reported
+   under another, internally inconsistent. Fixed by adding `make_privacy_engine()` in
+   `src/privacy/dp.py`, used everywhere a `PrivacyEngine` is constructed, explicitly
+   pinning `accountant="rdp"`.
+2. **`OverflowError` on near-zero-noise epsilon queries**: `privacy_engine.get_epsilon()`
+   is mathematically infinite as `noise_multiplier -> 0` (no noise = no privacy), and
+   Opacus's accountant can overflow computing that limit rather than returning it.
+   Fixed with `try/except OverflowError: epsilon_spent = float("inf")` in
+   `train_local_round_dp`.
+3. **Opacus refuses to re-attach hooks to an already-wrapped model.** This isn't a bug
+   to work around — it's a correct guard that validates the design already in place:
+   `client_app.py`'s `@app.train()` always constructs a fresh `DenseNet121Head()` each
+   round and loads the previous round's returned `classifier_state` into it, so the
+   same model object is never re-wrapped. The bug was in the *tests*, which initially
+   reused one model object across simulated rounds; fixed by matching the real
+   fresh-model-per-round pattern.
+4. **Methodological lesson in the tests themselves**: the first version of
+   `tests/test_dp.py` tried to verify "clipping bounds the update" and "noise scales
+   with the multiplier" by comparing final Adam-optimized parameter positions across
+   configurations — Adam's adaptive per-parameter normalization actively confounds
+   raw-gradient-magnitude comparisons (produced a wrong-direction assertion failure).
+   Rewritten to directly inspect Opacus's internal mechanism instead: call
+   `dp_opt.clip_and_accumulate()` by hand, inspect `param.grad_sample` (pre-clip
+   per-sample norms) and `param.summed_grad` (post-clip — must satisfy
+   `summed_norm <= max_grad_norm * batch_size` by the triangle inequality), then
+   `dp_opt.add_noise()` and inspect `param.grad` to isolate the injected noise
+   magnitude. Worth remembering for any future test of a clipping/noising mechanism —
+   test the mechanism directly, not through an optimizer that will confound it.
+
+**Real live validation — two full `flwr run` executions (5 rounds each, natural
+partition, 3 nodes), not mocks, comparing directly against Stage 13's no-DP round-5
+result (`pooled_test_auroc=0.8182`):**
+
+| Run | target-epsilon | Round 5 pooled_test_auroc | Round 5 client_val_auroc | epsilon_spent trend (aggregated across hospitals) |
+|---|---|---|---|---|
+| Stage 13 (no DP) | — | 0.8182 | — | — |
+| Stage 14, looser budget | 4.0 | 0.8152 | 0.8185 | 3.20 → 3.43 → 3.65 (rounds 3–5), noise_multiplier=0.6365 |
+| Stage 14, tighter budget | 1.0 | 0.8022 | 0.8032 | 0.835 → 0.848 → 0.849 → 0.888 → 0.873 (rounds 1–5), noise_multiplier=1.0544 |
+
+**Confirms Stage 14's own testing criterion — decreasing epsilon monotonically
+decreases accuracy — with real measured numbers, not an assumption:**
+epsilon=4 costs ~0.3 AUROC points vs. no-DP (0.8182 → 0.8152); epsilon=1 costs ~1.6
+points (0.8182 → 0.8022). Both are honest, moderate utility costs at these budgets —
+neither run collapsed to chance, and the accountant visibly accumulates budget every
+round (never resets), which is exactly what Stage 14 needed to demonstrate to be
+trustworthy. Per-round `epsilon_spent` here is a weighted mean across the 3 hospitals'
+individually-tracked accountants (each has its own `PrivacyEngine`, since each
+hospital has a different dataset size and therefore a different noise multiplier for
+the same target epsilon) — the slight non-monotonic dip at epsilon=1's round 5 (0.888
+→ 0.873) reflects that aggregation, not the underlying per-hospital accountants, each
+of which is unit-tested to increase strictly monotonically
+(`test_accountant_consumes_budget_monotonically_across_rounds`).
+
+10 new tests (111 total): `tests/test_accounting.py` (4 — `compute_total_steps`
+arithmetic, `compute_noise_multiplier` increases for tighter epsilon and for more
+steps) and `tests/test_dp.py` (6 — clipping bounds the summed gradient, looser clip
+norm permits a larger summed gradient, noise scales with the multiplier, the
+accountant consumes budget monotonically across rounds using the same `PrivacyEngine`,
+zero-noise DP-SGD still sensibly reduces loss on separable synthetic data, and the
+returned classifier state loads cleanly into a plain unwrapped classifier with no
+leftover Opacus `_module.` prefix).
+
 **Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), all of Phase 2 (Stages 6–12),
-and Phase 3's Stage 13 are now complete.**
+and Phase 3's Stages 13–14 are now complete.**
 
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
@@ -413,8 +506,11 @@ OPT-6 after Stages 11/18/19 (needs a trained model, Grad-CAM, and MC Dropout).
   results/paper.
 - **Dropout placement** (head-only vs. after dense blocks, `CLAUDE.md` §14 item, needed
   at Stage 8): open.
-- **Target epsilon values** for the DP sweep + delta relative to dataset size (needed
-  at Stage 14): open.
+- **DG-7 (target epsilon values for the DP sweep + delta relative to dataset size):
+  RESOLVED 2026-08-29** — delta=1e-5, epsilon sweep {1, 2, 4, 8}, target-epsilon=4.0
+  (sweep midpoint) as the `pyproject.toml` config default. See §7's Stage 14 note for
+  the two real comparison runs (epsilon=4 and epsilon=1) already completed; epsilon=2
+  and epsilon=8 are not yet run — needed for the full ablation-table sweep later.
 - **Client count** / default partition scheme for headline results (needed at Stage 5):
   open, related to DG-3.
 
@@ -472,14 +568,16 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. `f684195` (Stage 12) is pushed to `origin/main`; Stage 13
+**Branch:** `main`. Stage 13 and Stage 14 are both about to be committed together as
+the next commit(s) on top of `f684195` (Stage 12) — Stage 13
 (`src/federated/{client_app,server_app,serialization,strategy}.py`,
 `conf/federated/fedavg.yaml`, `pyproject.toml`/`uv.lock` — `flwr[simulation]` extra,
 `[tool.flwr.app]` config, project rename — `tests/test_federated.py`,
-`src/training/trainer.py`'s `train_local_round` addition/fix, this file's update) is
-about to be committed as the next commit on top of that. Check `git log --oneline -5`
-on resume — this file is not re-updated after every single commit within a session,
-only at natural pause points.
+`src/training/trainer.py`'s `train_local_round` addition/fix) and Stage 14
+(`src/privacy/{dp,accounting}.py`, `client_app.py`/`server_app.py`'s DP wiring,
+`pyproject.toml`'s DP config keys, `tests/test_dp.py`, `tests/test_accounting.py`),
+plus this file's update. Check `git log --oneline -5` on resume — this file is not
+re-updated after every single commit within a session, only at natural pause points.
 
 ```
 f684195 Stage 12: centralized pooled baseline (ablation row 2) — Phase 2 complete
@@ -501,35 +599,34 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-**Stage 13 is complete — FedAvg works, verified with a real 20-round run, not a mock.**
-Both make-or-break stages in the whole project (8 and 13) are now cleared. See §7's
-Stage 13 note for the full real-numbers comparison (FedAvg lands close to but slightly
-below local/centralized on every hospital — an honest, expected non-IID finding, not
-a red flag) and the list of real Flower-tooling issues found and fixed.
+**Stage 14 is complete — DP-SGD works, DG-7 is resolved, and both are verified with
+two real live `flwr run` executions (epsilon=4 and epsilon=1), not mocks.** Every
+make-or-break/high-risk stage so far (8, 13, 14) is now cleared. See §7's Stage 14
+note for the full real-numbers privacy-utility comparison and the four real bugs
+found and fixed (accountant-type mismatch, `OverflowError` on near-zero noise, the
+Opacus re-wrap guard validating the fresh-model-per-round design, and the
+Adam-confounded test-design lesson).
 
-Next is **Stage 14 — Differential Privacy with formal accounting** (`REQ`,
-**`L`-sized**, **ablation row 5**, **Decision Gate DG-7**) — per CLAUDE.md's strict
-ordering rule, this can only start now that FedAvg is verified working DP-free, which
-Stage 13 just did. What it needs: `src/privacy/dp.py` (Opacus `PrivacyEngine` inside
-the client fit loop — this means reworking `client_app.py`'s `train()` to wrap the
-per-sample-gradient path Stage 8 already validated, not `train_local_round`'s current
-plain-Adam loop), `src/privacy/accounting.py` (an accountant that accumulates budget
-**across rounds**, not just within one — CLAUDE.md flags this as the classic silent
-bug in FL+DP work), `conf/privacy/dp_*.yaml`. `BatchMemoryManager` for the 4GB VRAM
-budget (Stage 8 already proved headroom exists — 0.37GB/4GB at batch 32 for a single
-DP-SGD step — but that was a single client in isolation, not 3 simulated nodes
-possibly running concurrently under Ray).
+Next is **Stage 15 — Secure Aggregation with Flower SecAgg+** (`REQ`, **`L`-sized**,
+**ablation row 4**, **ADR-3**) — masking the client's classifier-head update so even
+the (honest-but-curious) server never sees an individual hospital's unmasked update,
+only the aggregate. Per ADR-3, this must use Flower's built-in SecAgg+ workflow —
+**no custom cryptography**. What it needs: wiring Flower's `SecAggPlusWorkflow` (or
+current equivalent — verify against the pinned 1.35.0 API the same way Stage 13's
+Message-API surface was verified, not from memory or older docs, per ADR-5) into
+`server_app.py`'s aggregation step; SecAgg+ operates over a finite field, so the
+head-only `ArrayRecord` update needs quantization before masking (ADR-3 flags this
+explicitly as something to measure and report, not hide — it's the ablation table's
+row 4 vs. row 3 comparison). The single most important test for this stage, named
+directly in CLAUDE.md §11.3: **masks cancel exactly — the unmasked aggregate must
+equal plain FedAvg within tolerance.** That test is what turns "we implemented
+SecAgg" into a defensible claim for the paper.
 
-**DG-7, open and blocking real progress here**: target epsilon values for the sweep,
-and delta relative to dataset size — CLAUDE.md §14 already lists this as a pending
-decision (not resolved by anything done this session). **Raise this with the owner
-before implementing**, the same way DG-2/DG-3/DG-5 were — don't default silently.
-
-**This is another substantial stage** (`L`-sized, like Stage 13) introducing a new
-approved-but-unused dependency path (Opacus's `PrivacyEngine`, not just
-`ModuleValidator`) into the live federated training loop for the first time. Given how
-much has been built this session (Stages 8 through 13, six stages including two
-make-or-break gates), **a fresh check-in with the owner before starting Stage 14 is
-warranted** rather than assuming continuation — both because of DG-7 and because
-Phase 3's remaining stages (14 DP, 15 SecAgg, 16 TLS, 17 Docker deployment) are the
-project's actual privacy/security claims, not more baseline infrastructure.
+No new decision gate is currently known to block Stage 15 (unlike DG-7 for Stage 14).
+Given the project has now completed 7 major stages in this session (8 through 14,
+covering the entire FL+DP core — feature caching, the frozen backbone, both
+baselines, FedAvg, and differential privacy), **a fresh check-in with the owner before
+starting Stage 15 is still warranted** as a natural phase-scope checkpoint, following
+the same pattern used before Stages 13 and 14 — not because of an open gate, but
+because Stage 15 is itself `L`-sized and touches the server's aggregation path for
+the first time since Stage 13.

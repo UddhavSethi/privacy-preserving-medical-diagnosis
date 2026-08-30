@@ -92,3 +92,16 @@ learning-rate = 0.001
 batch-size = 32
 fraction-evaluate = 1.0
 seed = 42
+
+# Stage 14 — Differential Privacy (ADR-2), config-switchable. Default OFF: Stage 13's
+# verified-working FedAvg-without-DP path is unaffected unless dp-enabled is
+# explicitly overridden (`--run-config "dp-enabled=true"`). DG-7 (owner-approved
+# 2026-08-29): target epsilon sweep {1, 2, 4, 8}, delta=1e-5 (standard for
+# datasets in the thousands-to-tens-of-thousands range, and well below 1/N for every
+# hospital — smallest is Hospital A at N=4,180 train, so 1/N~=2.4e-4 >> 1e-5).
+# target-epsilon below is the sweep's midpoint (4), used as the config default;
+# override per run for the other sweep values.
+dp-enabled = false
+target-epsilon = 4.0
+target-delta = 0.00001
+max-grad-norm = 1.0
