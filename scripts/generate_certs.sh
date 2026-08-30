@@ -4,8 +4,14 @@
 # Generates, entirely locally:
 #   1. A self-signed local certificate authority (certs/ca.{key,crt}).
 #   2. A SuperLink server certificate signed by that CA (certs/server.{key,pem}),
-#      with SANs covering localhost/127.0.0.1/::1 for this project's local and
-#      Docker Compose (Stage 17) deployment modes.
+#      with SANs covering localhost/127.0.0.1/::1 (host-only deployment, Stage 16)
+#      AND the `superlink` Docker Compose service name (Stage 17) — found
+#      necessary via a real failed deployment run, not by inspection: TLS
+#      hostname verification silently fails (repeated "Connection attempt
+#      failed" with no clear error surfaced) when a client connects via a
+#      hostname absent from the server cert's SAN list, which `superlink`
+#      is when containers reach it over the Compose network by service name
+#      rather than 127.0.0.1.
 #   3. One ECDSA-384 keypair per hospital (certs/hospital_{A,B,C}[.pub]) for
 #      Flower's node-authentication mechanism (`--enable-supernode-auth` on the
 #      SuperLink, `--auth-supernode-private-key` on each SuperNode, the public
@@ -57,6 +63,7 @@ subjectAltName = @alt_names
 
 [alt_names]
 DNS.1 = localhost
+DNS.2 = superlink
 IP.1 = ::1
 IP.2 = 127.0.0.1
 IP.3 = 0.0.0.0

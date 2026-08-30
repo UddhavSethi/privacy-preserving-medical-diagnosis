@@ -1,0 +1,61 @@
+# Stage 17 — Docker Compose multi-client deployment.
+#
+# Runs `flower-superlink`. Also where the `flwr-serverapp` subprocess actually
+# executes (Flower's default `--isolation subprocess` runs the ServerApp inside
+# the SuperLink's own process tree), so this image needs the full ML dependency
+# stack and src/, not just Flower's control-plane pieces.
+#
+# CPU-only build (DG-9, owner-approved 2026-08-30): the pinned torch/torchvision
+# in pyproject.toml/uv.lock target CUDA (pytorch-cu126) for the host dev
+# environment's GPU. This Docker Compose demonstration runs CPU-only by design —
+# three GPU containers wouldn't fit in this project's 4GB VRAM budget, and GPU
+# access inside Docker needs the NVIDIA container toolkit besides. Same exact
+# pinned torch/torchvision *version*, CPU wheels instead of CUDA wheels, isolated
+# to this build context only — the committed pyproject.toml/uv.lock (and the host
+# dev environment) are unchanged.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir uv==0.11.33
+
+# Direct `uv pip install` at the exact same pinned versions as pyproject.toml,
+# not `uv sync` against the committed uv.lock — found necessary during this
+# stage's own build (not by inspection): uv.lock's resolution is CUDA-oriented
+# (torch==2.13.0+cu126), and excluding torch/torchvision by name via
+# `--no-install-package` does NOT prune their transitive nvidia-*-cu12 /
+# triton dependencies from a `--frozen` sync (uv still resolves and installs
+# ~2GB of CUDA shared libraries that nothing in a CPU-only container needs).
+# Direct installs sidestep the lockfile's CUDA-oriented resolution entirely.
+# Trade-off, stated plainly: transitive/indirect dependency versions are
+# resolved fresh here rather than pinned via uv.lock; every *direct*
+# dependency is pinned identically to the host dev environment. Acceptable
+# for a CPU-only demonstration container whose measured results are not used
+# for the paper (ADR-8/DG-9: real numbers come from host-side simulation).
+#
+# Plain `flwr==1.35.0` (no `[simulation]` extra) — the deployment engine used
+# here doesn't need the simulation backend's `ray` dependency at all, and
+# skipping it avoids pulling in a large, unused package.
+RUN uv pip install --system --no-cache \
+        torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cpu && \
+    uv pip install --system --no-cache \
+        flwr==1.35.0 \
+        opacus==1.6.0 \
+        opencv-python-headless==5.0.0.93 \
+        hydra-core==1.3.5 \
+        omegaconf==2.3.1 \
+        mlflow==3.15.2 \
+        numpy==2.4.6 \
+        pandas==2.3.3 \
+        scikit-learn==1.9.0 \
+        pydicom==3.0.2 \
+        pillow==12.3.0 \
+        tqdm==4.70.0 \
+        matplotlib==3.11.1 \
+        grad-cam==1.5.7 \
+        requests==2.34.2
+
+COPY src ./src
+COPY pyproject.toml ./
+
+ENTRYPOINT ["flower-superlink"]

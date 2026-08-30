@@ -47,6 +47,20 @@ _feature_cache: dict[tuple[str, str, str], HospitalFeatures] = {}
 _privacy_engine_cache: dict[str, tuple[PrivacyEngine, float]] = {}  # hospital -> (engine, noise_multiplier)
 
 
+def _resolve_config(context: Context, key: str) -> str:
+    """Node-level config overrides run-level config when present. Stage 13-16
+    simulation runs never set these at the node level, so this is a no-op
+    fallback there; Stage 17's Docker Compose deployment gives each hospital
+    container its own `--node-config "feature-cache-dir=... partition-path=..."`
+    pointing at a filesystem path containing ONLY that hospital's data — real
+    per-hospital isolation (the plan's own testing criterion), not just
+    code-level patient_id filtering, with zero change to the training/
+    aggregation logic itself."""
+    if key in context.node_config:
+        return str(context.node_config[key])
+    return str(context.run_config[key])
+
+
 def _get_hospital_features(hospital: str, partition_path: str, feature_cache_dir: str) -> HospitalFeatures:
     key = (hospital, partition_path, feature_cache_dir)
     if key not in _feature_cache:
@@ -80,7 +94,7 @@ def train(msg: Message, context: Context) -> Message:
     partition_id = context.node_config["partition-id"]
     hospital = PARTITION_TO_HOSPITAL[partition_id]
     features = _get_hospital_features(
-        hospital, context.run_config["partition-path"], context.run_config["feature-cache-dir"]
+        hospital, _resolve_config(context, "partition-path"), _resolve_config(context, "feature-cache-dir")
     )
     seed = int(context.run_config["seed"]) + partition_id
     local_epochs = int(context.run_config["local-epochs"])
@@ -142,7 +156,7 @@ def evaluate(msg: Message, context: Context) -> Message:
     partition_id = context.node_config["partition-id"]
     hospital = PARTITION_TO_HOSPITAL[partition_id]
     features = _get_hospital_features(
-        hospital, context.run_config["partition-path"], context.run_config["feature-cache-dir"]
+        hospital, _resolve_config(context, "partition-path"), _resolve_config(context, "feature-cache-dir")
     )
 
     model = DenseNet121Head()

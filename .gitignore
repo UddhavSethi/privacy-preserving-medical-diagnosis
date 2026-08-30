@@ -1,5 +1,6 @@
 # ---- Secrets / security material (CLAUDE.md §13, §17.4) ----
 certs/
+.flwr_home/
 *.pem
 *.key
 *.crt

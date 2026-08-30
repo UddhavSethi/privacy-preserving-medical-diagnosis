@@ -567,8 +567,8 @@ touch them.
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), and Phase 3's Stages 13–16 (all of Phase 3) complete — FedAvg verified working end-to-end (real 20-round run), Differential Privacy (Opacus DP-SGD, sample-level, RDP accountant) verified via two real live runs at target-epsilon 4 and 1, Secure Aggregation (Flower SecAgg+, ADR-3) verified via a real live run with updates actually masked, and TLS + client authentication (ADR-4) verified end-to-end in deployment mode — real separate processes, real gRPC, real encrypted+authenticated channel, using the canonical Stage 13/14 app unmodified (confirms ADR-8). Docker Compose packaging (Stage 17) not yet implemented. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
-| Docker configuration | None |
+| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), and all of Phase 3 (Stages 13–17) complete — FedAvg verified working end-to-end (real 20-round run), Differential Privacy (Opacus DP-SGD, sample-level, RDP accountant) verified via two real live runs at target-epsilon 4 and 1, Secure Aggregation (Flower SecAgg+, ADR-3) verified via a real live run with updates actually masked, TLS + client authentication (ADR-4) verified end-to-end in deployment mode, and Docker Compose deployment (Stage 17) verified via a real multi-container run — 4 separate containers, real TLS, real client auth, real per-hospital data isolation, 3 full federated rounds, using the canonical Stage 13/14/16 app unmodified (confirms ADR-8 in the strongest form yet). Phase 4 (Grad-CAM, MC Dropout) not yet started. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
+| Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`. |
 | Tests | 119 passing |
 
 ### Resolved decisions
@@ -653,23 +653,36 @@ touch them.
    this pair to run ablation row 4, then reverted — see `docs/SESSION_STATE.md` §7's Stage
    15 note for the exact procedure and the real live-validation results.
 
+8. **Decision Gate DG-9 — Stage 17 Docker demonstration scope (resolved 2026-08-30,
+   owner-approved).** CPU-only, few rounds — this is a demonstration, not a
+   measurement (real numbers already come from simulation, Stages 11-15). Also
+   scoped, same approval: the Docker Compose demonstration covers **FedAvg +
+   TLS/client-auth only** (the canonical Stage 13/14/16 app, unmodified), not
+   every layer combined at once — SecAgg+'s separate legacy-API app pair (Stage
+   15) is not part of it, and a "full system" (ablation row 6) demonstration is
+   deferred as its own later step. Verified end-to-end with a real
+   `docker compose` run: 4 separate containers (one SuperLink + three
+   hospitals), real TLS, real client authentication, real per-hospital
+   filesystem-level data isolation (each hospital container's mounted data
+   directory contains only that hospital's records — `scripts/
+   prepare_deployment_shards.py`), 3 full federated rounds with all 3
+   hospitals participating every round. Full detail, including three real
+   bugs found and fixed along the way (a CUDA-dependency chain in the Docker
+   build, a TLS SAN mismatch for the `superlink` Compose hostname, and a
+   registration-before-connection race condition), in `docs/SESSION_STATE.md`
+   §7's Stage 17 note.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
 1. **Client count** and default partition scheme for the headline results — partially
    resolved by DG-3 (client count of 3 for the natural regime); still open for the
    Dirichlet synthetic sweep's client count and which regime is the paper's primary
    headline vs. secondary comparison.
-2. **Decision Gate DG-9 (Stage 17 demonstration scope)**: GPU access inside Docker
-   needs the NVIDIA container toolkit, and three GPU containers won't fit in 4GB
-   VRAM. The plan's own recommendation is CPU-only, few rounds (a demonstration,
-   not a measurement — real numbers already come from simulation, Stages 11-15).
-   Needs owner confirmation before Stage 17 is scoped.
-3. **Whether the Stage 17 Docker demonstration combines every layer at once**
-   (FedAvg + SecAgg + DP + TLS, ablation row 6) — which requires reconciling
-   Stage 15's separate legacy-API SecAgg app pair with Stage 13/14's canonical
-   Message-API app plus Stage 16's TLS/auth — **or** demonstrates FedAvg + TLS/auth
-   only (already proven working together) with row-6 integration scoped
-   separately later. Not yet raised for a decision.
+2. **Whether/when a "full system" demonstration (FedAvg + SecAgg + DP + TLS,
+   ablation row 6) gets built** — deferred, not resolved, when Stage 17 was
+   scoped (see item 8 below). Requires reconciling Stage 15's separate
+   legacy-API SecAgg app pair with Stage 13/14/16's canonical Message-API app.
+   Not yet raised for a decision on timing.
 
 ---
 

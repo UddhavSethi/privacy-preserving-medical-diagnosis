@@ -168,8 +168,9 @@ re-asserted by a dedicated test against the live files).
 | 13 — Flower FedAvg in simulation (ablation row 3) | **Done — real 20-round FedAvg run completed end-to-end.** 101/101 tests passing (4 new). No privacy layers yet (by design — DP/SecAgg/TLS come next). Several real Flower-tooling issues hit and fixed; see note below the table. | (pending commit this session) |
 | 14 — Differential Privacy with formal accounting (ablation row 5) | **Done — DG-7 resolved and applied.** Opacus DP-SGD wired into `client_app.py` as a config-switchable layer (`dp-enabled`, default `false`; Stage 13's no-DP path untouched). 111/111 tests passing (10 new). Two real live `flwr run` DP runs at epsilon=4 and epsilon=1, confirming the expected privacy-utility tradeoff. See note below the table. | 90bf95f |
 | 15 — Secure Aggregation with Flower SecAgg+ (ablation row 4) | **Done — real live `flwr run` with SecAgg+ actually masking updates.** SecAgg+ at flwr==1.35.0 only integrates via Flower's legacy Strategy/workflow API (not Stage 13/14's Message-API `strategy.start()`), confirmed against installed source + Flower's own reference example — a genuine API-surface finding, raised with and approved by the owner before implementation. Separate `client_app_secagg.py`/`server_app_secagg.py` app pair. 114/114 tests passing (3 new). See note below the table. | 20cc551 |
-| 16 — TLS + client authentication (ADR-4) | **Done — real TLS + Flower node-authentication validated end-to-end, deployment engine (not simulation), using Stage 13/14's canonical app unmodified (ADR-8 confirmed).** `scripts/generate_certs.sh`, `src/federated/security.py`, `conf/federated/tls.yaml`, `tests/{test_tls_auth,test_security}.py`. 119/119 tests passing (5 new), including a real subprocess-level negative test (unregistered SuperNode rejected) and positive test (registered SuperNode accepted). See note below the table. | (pending commit this session) |
-| 17–23 | Not started | — |
+| 16 — TLS + client authentication (ADR-4) | **Done — real TLS + Flower node-authentication validated end-to-end, deployment engine (not simulation), using Stage 13/14's canonical app unmodified (ADR-8 confirmed).** `scripts/generate_certs.sh`, `src/federated/security.py`, `conf/federated/tls.yaml`, `tests/{test_tls_auth,test_security}.py`. 119/119 tests passing (5 new), including a real subprocess-level negative test (unregistered SuperNode rejected) and positive test (registered SuperNode accepted). See note below the table. | e078cee |
+| 17 — Docker Compose multi-client deployment | **Done — real `docker compose` run, 4 separate containers over a real Docker network, all 3 hospitals training every round, clean teardown.** Scope (owner-approved 2026-08-30): FedAvg + TLS/auth only, CPU-only (DG-9). `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}`, `scripts/{run_deployment.sh,prepare_deployment_shards.py}`, `client_app.py`'s `_resolve_config()` addition. Three real bugs found and fixed via live runs, not inspection — see note below the table. Still 119/119 (no new unit tests — infra/deployment stage). | (pending commit this session) |
+| 18–23 | Not started | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -685,9 +686,129 @@ explicitly configured" is stale for this pinned version — documented in
 `security.py`'s docstring and `conf/federated/tls.yaml` rather than silently
 claiming something was "configured" that has no CLI surface any more.
 
+**Stage 17 (`docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}`,
+`scripts/{run_deployment.sh,prepare_deployment_shards.py}`,
+`src/federated/client_app.py`'s `_resolve_config()`) — Docker Compose
+multi-client deployment, the single most convincing demonstration artifact:
+real separate containers, real gRPC, real TLS, real client authentication,
+real per-hospital data isolation.**
+
+**Scope decisions, both owner-approved 2026-08-30**: (1) DG-9 resolved as
+CPU-only, few rounds — this is a demonstration, not a measurement (real
+numbers come from simulation, Stages 11-15); (2) FedAvg + TLS/auth only, using
+Stage 13/14/16's canonical app completely unmodified — SecAgg+'s separate
+legacy-API app pair (Stage 15) is not part of this demonstration; combining
+every layer at once (ablation row 6) is deferred as its own later integration
+step, since it requires reconciling two different Flower API surfaces first,
+which is real integration work, not Docker packaging.
+
+**Real per-hospital filesystem isolation (not just code-level patient_id
+filtering)**: `scripts/prepare_deployment_shards.py` pre-slices the shared
+feature cache (which stores Hospital B and C as patient-disjoint shards of the
+*same* `rsna_*.pt` files) into one directory per hospital containing ONLY that
+hospital's records — real counts: Hospital A 4180/841/835 train/val/test
+(Kermany, unchanged since it's already 100% of that source), Hospital B
+9330/2034/1978, Hospital C 9348/1969/2025 (both RSNA shards, confirmed disjoint
+and summing to the known ~13,342 per hospital across splits). Docker Compose
+bind-mounts each hospital's directory, read-only, into only that hospital's own
+container — no other hospital's data exists at any path inside that container,
+not merely code that promises not to read it. Enabled by one small, additive
+change to `client_app.py`: `_resolve_config()` checks `context.node_config`
+before falling back to `context.run_config` for `feature-cache-dir` and
+`partition-path` — simulation mode (Stages 13-16) never sets these at the node
+level, so this is a pure no-op there; Docker Compose gives each hospital
+container its own `--node-config "... feature-cache-dir=/data/hospital
+partition-path=/data/hospital/partition.json"`. No change to the actual
+training/aggregation logic itself.
+
+**Three real bugs found and fixed via live runs — none by inspection, all by
+watching an actual attempt fail and diagnosing from evidence:**
+
+1. **CUDA dependency bloat in the Docker build.** `uv sync --frozen
+   --no-install-package torch --no-install-package torchvision` still pulled
+   in ~2GB of unused `nvidia-*-cu12`/`triton` packages — excluding a package by
+   name does not prune its transitive dependencies from a frozen lockfile sync
+   when the lockfile's own resolution is CUDA-oriented (this project's
+   `uv.lock` targets `torch==2.13.0+cu126` for the host dev GPU). Fixed by
+   abandoning `uv sync` for the Docker build entirely and using direct `uv pip
+   install --system` calls at the exact same pinned versions as
+   `pyproject.toml` (CPU torch/torchvision from a separate index, everything
+   else from PyPI) — bypasses the lockfile's CUDA-oriented resolution for the
+   Docker build context only; the committed `pyproject.toml`/`uv.lock` and host
+   dev environment are completely unchanged. Also switched to plain
+   `flwr==1.35.0` instead of `flwr[simulation]==1.35.0` in the images, since
+   the deployment engine doesn't need the simulation backend's `ray`
+   dependency. Final image size: 2.4GB per container (was headed toward 5GB+
+   before the fix). **Worth remembering for any future CPU-variant Docker
+   image built from a CUDA-oriented lockfile: `--no-install-package` is not
+   suffient on its own.**
+
+2. **TLS SAN mismatch for the Docker Compose service name.** The first live
+   deployment run got stuck indefinitely — all 3 hospital SuperNode containers
+   showed repeated "Connection attempt failed, retrying" with zero nodes ever
+   connecting, and no clear error surfaced in the logs. Raw TCP connectivity
+   between containers tested fine (`socket.create_connection` succeeded),
+   isolating the failure to the TLS layer. Root cause: the server
+   certificate's SAN list (`scripts/generate_certs.sh`'s `certificate.conf`)
+   only covered `localhost`/`127.0.0.1`/`::1`/`0.0.0.0` — correct for Stage
+   16's host-only validation, but hospital containers reach the SuperLink via
+   the Docker Compose service name `superlink`, which wasn't in the SAN list,
+   so TLS hostname verification silently failed. Fixed by adding `DNS.2 =
+   superlink` to the SAN list. **Worth remembering: TLS hostname-verification
+   failures in gRPC can present as silent, uninformative retry loops rather
+   than a clear certificate error — when a container-to-container TLS
+   connection won't come up, check the server cert's SAN against the actual
+   hostname being dialed before looking anywhere else.**
+
+3. **Registration-before-connection race condition.** With the SAN fix alone,
+   the second live run got 2 of 3 hospitals connected but the third
+   (hospital-c) got permanently stuck. Its logs showed `FAILED_PRECONDITION` /
+   "Failed to activate SuperNode" followed by a Python traceback and
+   `RuntimeError: generator didn't yield` — then the container sat "Up"
+   forever, its SuperExec sidecar still polling but its actual Fleet
+   connection dead. Root cause: `docker compose up -d` for all 4 services
+   starts every hospital SuperNode immediately, but `flwr supernode register`
+   for each hospital runs afterward, sequentially, in the script — so a
+   SuperNode's very first activation attempt can land in the window before its
+   own key is registered. Unlike a plain connection failure (which Flower does
+   retry, as seen with the other two hospitals eventually succeeding), a hard
+   `FAILED_PRECONDITION` activation rejection crashes that connection attempt
+   permanently with no further retry from inside that process. Fixed by
+   restructuring `scripts/run_deployment.sh`: start only the `superlink`
+   container first, wait for its Control API, register all 3 hospitals, *then*
+   start `hospital-a`/`hospital-b`/`hospital-c` — eliminating the race
+   entirely rather than trying to out-time it with delays. **Worth
+   remembering: Flower's SuperNode auth doesn't tolerate "start everything at
+   once and let it sort itself out" the way an unauthenticated setup would —
+   registration must complete before the first connection attempt, every
+   time, for every node.**
+
+**Real live validation — full 3-round `flwr run . deployment` over the actual
+Docker Compose network** (superlink + hospital-a + hospital-b + hospital-c,
+4 separate containers, real TLS, real authenticated gRPC, real per-hospital
+data isolation, using Stage 13/14/16's canonical app completely unmodified):
+all 3 hospitals sampled and contributed every round, 0 failures.
+
+| Round | pooled_test_auroc | client_val_auroc |
+|---|---|---|
+| 0 (init) | 0.2919 | — |
+| 1 | 0.8048 | 0.8174 |
+| 2 | 0.8081 | 0.8350 |
+| 3 | 0.8148 | 0.8428 |
+
+Matches the same early-round trajectory seen in every other run this session
+(Stages 13-16) — **this is the strongest confirmation yet of ADR-8's "same
+code, both engines" claim**: the identical `client_app.py`/`server_app.py`
+that produced Stage 13's 20-round simulation result and Stage 16's host-process
+deployment result now also works, unmodified, across 4 genuinely separate
+containers on a real Docker network with real TLS and real authentication.
+Clean teardown confirmed both in-script (the `trap cleanup EXIT` output) and
+independently (`docker ps -a` showed nothing running afterward).
+
 **Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), all of Phase 2 (Stages 6–12),
-and Phase 3's Stages 13–16 are now complete — the entire FL + DP + SecAgg + TLS/auth
-core (rows 1-6 of the ablation ladder are now all individually implementable).**
+and all of Phase 3 (Stages 13–17) are now complete — the entire FL + DP + SecAgg +
+TLS/auth + Docker deployment core (rows 1-6 of the ablation ladder are all
+individually implementable, and the demonstration artifact is real and working).**
 
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
@@ -774,25 +895,26 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. Stage 16 is about to be committed on top of `20cc551` (Stage
-15) — `scripts/generate_certs.sh` (new), `src/federated/security.py` (new),
-`conf/federated/tls.yaml` (new), `tests/{test_tls_auth,test_security}.py`
-(new), `pyproject.toml`'s Stage 16 doc-comment (the `[tool.flwr.federations.X]`
-block that was briefly added was **removed again** — see §7's Stage 16 note
-for why; `pyproject.toml`'s only lasting change from this stage is a comment),
-plus this file's update. `certs/` was generated locally during validation and
-confirmed absent from `git status` throughout (gitignored). The manually-edited
-`~/.flwr/config.toml` entry used for live validation was reverted to its
-original state before finishing. Check `git log --oneline -5` on resume — this
-file is not re-updated after every single commit within a session, only at
-natural pause points.
+**Branch:** `main`. Stage 17 is about to be committed on top of `e078cee`
+(Stage 16) — `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}`
+(new), `scripts/run_deployment.sh` (new), `scripts/prepare_deployment_shards.py`
+(new), `scripts/generate_certs.sh` (SAN fix for the `superlink` Compose
+hostname), `src/federated/client_app.py` (`_resolve_config()` addition),
+plus this file's update. `certs/`, `data/deployment_shards/`, and
+`.flwr_home/` were all generated locally during validation and confirmed
+absent from `git status` throughout (all gitignored, `.flwr_home/` added to
+`.gitignore` this stage). No changes to `pyproject.toml`/`uv.lock` — the
+Docker-specific dependency list lives only in the two Dockerfiles, at the
+same pinned versions. Check `git log --oneline -5` on resume — this file is
+not re-updated after every single commit within a session, only at natural
+pause points.
 
 ```
+e078cee Stage 16: TLS + client authentication (ADR-4)
 20cc551 Stage 15: Secure Aggregation via Flower SecAgg+ (ablation row 4)
 90bf95f Stage 14: Differential Privacy with formal accounting (ablation row 5) — DG-7 resolved
 915dae5 Stage 13: Flower FedAvg in simulation — FedAvg verified end-to-end (ablation row 3)
 f684195 Stage 12: centralized pooled baseline (ablation row 2) — Phase 2 complete
-c57ed27 Stage 11: local single-hospital baseline (ablation row 1)
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -804,56 +926,45 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-**Stage 16 is complete — real TLS + Flower node authentication validated
-end-to-end in deployment mode (not simulation), using Stage 13/14's canonical
-app completely unmodified.** Every make-or-break/high-risk stage so far (8,
-13, 14, 15, 16) is now cleared, and **ADR-8's "same code, both engines" claim
-is now actually demonstrated**, not just assumed. See §7's Stage 16 note for:
-the verified mechanism (`--enable-supernode-auth` + `--auth-supernode-private-key`
-+ `flwr supernode register`, ECDSA-384 OpenSSH keys — not the removed
-`--auth-list-public-keys`, not Ed25519), the real operational finding (SuperLink
-targets resolve through `~/.flwr/config.toml`'s named-connection registry, not
-`pyproject.toml`'s `[tool.flwr.federations.X]` — defining both under the same
-name breaks `flwr run` outright), the live validation (negative case rejected,
-positive case accepted, then 2 real rounds over authenticated TLS gRPC:
-round 2 `pooled_test_auroc=0.8081`), the stale-4MB-default finding for
-ADR-4's gRPC message-length text, and the process-teardown bug found while
-writing the tests (`flower-supernode`'s SuperExec sidecar keeps stdout open
-past a plain `terminate()`, requiring `os.killpg` on the whole process group).
+**Stage 17 is complete — Phase 3 is entirely done.** A real `docker compose`
+run (4 separate containers, real TLS, real client auth, real per-hospital
+filesystem isolation) completed 3 full federated rounds with all 3 hospitals
+participating every round, using Stage 13/14/16's canonical app completely
+unmodified — the strongest confirmation yet of ADR-8's "same code, both
+engines" claim. See §7's Stage 17 note for the two scope decisions (DG-9:
+CPU-only/few-rounds; FedAvg+TLS/auth only, SecAgg deferred), the real
+per-hospital data-isolation mechanism (`prepare_deployment_shards.py` +
+`client_app.py`'s new `_resolve_config()`), the three real bugs found and
+fixed via live runs (CUDA dependency bloat in the Docker build; a TLS SAN
+mismatch for the `superlink` Compose hostname; a registration-before-connection
+race that permanently crashed one SuperNode's first connection attempt), and
+the full real per-round results (round 3: `pooled_test_auroc=0.8148`,
+`client_val_auroc=0.8428`).
 
-Next is **Stage 17 — Docker Compose multi-client deployment** (`REQ`,
-**`M`-sized**, **Decision Gate DG-9**) — the single most convincing
-demonstration artifact available: one server container and three hospital
-containers (each with its own certificate, its own mounted data shard, real
-gRPC, real TLS, real SecAgg+), reproducible via `docker compose up` from a
-clean checkout. What it needs: `docker/Dockerfile.{client,server}`,
-`docker/docker-compose.yml`, `scripts/run_deployment.sh`. Stage 16 already
-proved the underlying mechanism works outside Docker (real separate OS
-processes) — Stage 17 is primarily a packaging/networking problem
-(certificate paths and hostnames differ inside containers vs. `127.0.0.1` on
-the host; each hospital container must only be able to see its own data
-shard, not the others'), not a new protocol-correctness question. **DG-9,
-open and needing the owner's input before this stage can be scoped**: GPU
-access inside Docker needs the NVIDIA container toolkit, and three GPU
-containers won't fit in 4GB VRAM — the plan's own recommendation is CPU-only,
-few rounds, since this is a demonstration (measurements already come from
-simulation per ADR-8, fully covered by Stages 11-15's real numbers), but the
-owner should confirm this scoping rather than it being assumed silently.
+**Every make-or-break/high-risk stage in the entire FL+DP+SecAgg+TLS+deployment
+core (8, 13, 14, 15, 16, 17) is now cleared.** Phase 3 (Stages 13-17) is fully
+done: all four privacy/security layers work individually, live, for real, and
+the demonstration artifact (Docker Compose) actually runs end to end.
 
-Also worth deciding explicitly with the owner at this checkpoint (not
-blocking, but relevant to how Stage 17 is packaged): whether the demonstration
-should combine ALL layers at once (FedAvg + SecAgg + DP + TLS, CLAUDE.md's
-"full system", ablation row 6) — which would require reconciling Stage 15's
-separate legacy-API SecAgg app pair with Stage 13/14's canonical Message-API
-app plus Stage 16's TLS/auth, a real integration a Docker demo would force —
-or whether Stage 17 demonstrates FedAvg + TLS/auth only (the canonical app,
-already proven working together in this stage) and the "full system" row-6
-integration is scoped as its own later step.
+Next is **Phase 4 — the clinical trust layer**, starting with **Stage 18 —
+Grad-CAM explainability** (`REQ`, **`M`-sized**) — applying Grad-CAM to the
+global model (target layer: final dense block / `features.norm5`) to produce
+heatmap overlays showing which lung regions drove each Pneumonia/Normal
+prediction, executed client-side on already-local images so nothing needs to
+move. Uses an established library (`pytorch-grad-cam`, already a pinned
+dependency — `grad-cam==1.5.7`, unused until now). What it needs: batch
+generation across true positive/false positive/true negative/false negative
+cases, heatmap overlay rendering, and (per CLAUDE.md §9) an honest framing
+that qualitative heatmaps alone are illustrative, not a result — quantitative
+Grad-CAM evaluation is an explicitly pending optional direction (§16.1), not
+in scope here.
 
-No new decision gate blocks *starting* Stage 17, but DG-9 blocks finishing its
-scope, and the row-6-integration question above should be raised. Given the
-project has now completed 9 major stages in this session (8 through 16 — the
-entire FL + DP + SecAgg + TLS/auth core), **a fresh check-in with the owner
-before starting Stage 17 is warranted**, both as a natural phase-scope
-checkpoint and because Docker Compose is new environment/tooling territory
-(Dockerfiles, container networking) this session hasn't touched yet.
+No open decision gate blocks Stage 18. It's a comparatively lower-risk,
+lower-integration-surface stage than anything in Phase 3 (no Flower protocol
+concerns, no new API-version verification needed, no distributed systems
+timing issues) — reads an already-trained checkpoint and a library call away
+from a usable result. Given Phase 3's scope and the number of real bugs
+chased down this session, **a check-in before starting Stage 18 is still the
+established pattern**, but the risk profile is genuinely lower going forward
+through Phase 4 (Stage 19 MC Dropout is similarly self-contained) than
+anything just completed.
