@@ -30,6 +30,7 @@ from flwr.clientapp import ClientApp
 from opacus import PrivacyEngine
 
 from src.evaluation.metrics import compute_metrics
+from src.evaluation.overhead import classifier_payload_size_bytes, measure_wall_clock
 from src.federated.serialization import array_record_to_classifier_state, classifier_state_to_array_record
 from src.models.densenet_head import DenseNet121Head
 from src.privacy.accounting import compute_noise_multiplier, compute_total_steps
@@ -107,40 +108,48 @@ def train(msg: Message, context: Context) -> Message:
     dp_enabled = bool(context.run_config.get("dp-enabled", False))
     metrics = {}
 
-    if dp_enabled:
-        eval_view_features = features.train_features[:, -1, :]  # deterministic view only
-        privacy_engine, noise_multiplier = _get_privacy_engine(
-            hospital, context, dataset_size=len(features.train_labels)
-        )
-        target_delta = float(context.run_config["target-delta"])
-        result = train_local_round_dp(
-            model,
-            eval_view_features,
-            features.train_labels,
-            seed=seed,
-            local_epochs=local_epochs,
-            lr=lr,
-            batch_size=batch_size,
-            noise_multiplier=noise_multiplier,
-            max_grad_norm=float(context.run_config["max-grad-norm"]),
-            target_delta=target_delta,
-            privacy_engine=privacy_engine,
-        )
-        metrics["epsilon_spent"] = result["epsilon_spent"]
-        metrics["noise_multiplier"] = noise_multiplier
-    else:
-        result = train_local_round(
-            model,
-            features.train_features,
-            features.train_labels,
-            seed=seed,
-            local_epochs=local_epochs,
-            lr=lr,
-            batch_size=batch_size,
-        )
+    # Stage 20 (CLAUDE.md section 11.2): wall-clock and payload size are
+    # first-class measured outputs, not afterthoughts — wrapping exactly the
+    # local-training call (not feature loading, which is cached/amortized
+    # across rounds) is what lets DP's and SecAgg's overhead be attributed
+    # separately, by comparing this same number with the layer on vs. off.
+    with measure_wall_clock() as timing:
+        if dp_enabled:
+            eval_view_features = features.train_features[:, -1, :]  # deterministic view only
+            privacy_engine, noise_multiplier = _get_privacy_engine(
+                hospital, context, dataset_size=len(features.train_labels)
+            )
+            target_delta = float(context.run_config["target-delta"])
+            result = train_local_round_dp(
+                model,
+                eval_view_features,
+                features.train_labels,
+                seed=seed,
+                local_epochs=local_epochs,
+                lr=lr,
+                batch_size=batch_size,
+                noise_multiplier=noise_multiplier,
+                max_grad_norm=float(context.run_config["max-grad-norm"]),
+                target_delta=target_delta,
+                privacy_engine=privacy_engine,
+            )
+            metrics["epsilon_spent"] = result["epsilon_spent"]
+            metrics["noise_multiplier"] = noise_multiplier
+        else:
+            result = train_local_round(
+                model,
+                features.train_features,
+                features.train_labels,
+                seed=seed,
+                local_epochs=local_epochs,
+                lr=lr,
+                batch_size=batch_size,
+            )
 
     metrics["train_loss"] = result["train_loss"]
     metrics["num-examples"] = result["num_examples"]
+    metrics["wall_clock_seconds"] = timing.wall_clock_seconds
+    metrics["payload_bytes"] = classifier_payload_size_bytes(result["classifier_state"])
 
     content = RecordDict(
         {

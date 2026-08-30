@@ -581,9 +581,9 @@ touch them.
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), all of Phase 3 (Stages 13–17), and Phase 4's Stages 18–19 complete — FedAvg, Differential Privacy, Secure Aggregation, TLS/client authentication and Docker Compose deployment all verified live end-to-end (see prior entries in git history); Grad-CAM explainability produces real, non-degenerate, class-discriminative heatmaps over real chest X-rays; Monte Carlo Dropout + deferral (DG-10 resolved) verified on the real pooled test set — retained-case accuracy (86.3%) exceeds overall accuracy (83.2%) after deferring the worst 10% by predictive entropy. Phase 4 is now complete. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
+| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), all of Phase 3 (Stages 13–17), all of Phase 4 (Stages 18–19), and Phase 5's Stage 20 complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live (see prior entries in git history); overhead instrumentation now reports real communication and compute cost per round, with DP's and SecAgg's overhead attributed separately from real live-run comparisons (DP: ~16x client compute time, zero payload-size change; SecAgg: ~13% total round-time overhead). Stage 21 (full ablation campaign) not yet started. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
 | Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`. |
-| Tests | 134 passing |
+| Tests | 140 passing |
 
 ### Resolved decisions
 

@@ -172,7 +172,8 @@ re-asserted by a dedicated test against the live files).
 | 17 — Docker Compose multi-client deployment | **Done — real `docker compose` run, 4 separate containers over a real Docker network, all 3 hospitals training every round, clean teardown.** Scope (owner-approved 2026-08-30): FedAvg + TLS/auth only, CPU-only (DG-9). `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}`, `scripts/{run_deployment.sh,prepare_deployment_shards.py}`, `client_app.py`'s `_resolve_config()` addition. Three real bugs found and fixed via live runs, not inspection — see note below the table. Still 119/119 (no new unit tests — infra/deployment stage). | 3ece93a |
 | 18 — Grad-CAM explainability | **Done — real, non-degenerate, class-discriminative heatmaps on real trained checkpoints and real chest X-rays.** A real ADR-1/Grad-CAM interaction the plan itself flagged as needing empirical verification turned out to be a real bug (crash, not silent wrong output) on the first live test run — see note below the table. `src/explain/gradcam.py`, `scripts/generate_explanations.py`. 125/125 tests passing (6 new). | 9fcc8af |
 | 19 — Monte Carlo Dropout and deferral | **Done — DG-10 resolved (fixed coverage target, defer worst 10%), verified on the real pooled test set: retained-case accuracy exceeds overall accuracy.** No implementation bugs this time (all 9 new tests passed on first run) — a clean stage after Grad-CAM's real bug. `src/uncertainty/{mc_dropout,deferral}.py`, `conf/experiment/uncertainty.yaml`. 134/134 tests passing (9 new). | (pending commit this session) |
-| 20–23 | Not started — Phase 4 (Stages 18-19) is now complete | — |
+| 20 — Overhead instrumentation | **Done — real per-round communication and compute cost, DP's and SecAgg's overhead attributed separately from real live-run comparisons.** `src/evaluation/overhead.py`, small additive instrumentation in `client_app.py`/`client_app_secagg.py`. 140/140 tests passing (6 new). See note below the table. | (pending commit this session) |
+| 21–23 | Not started — Phase 4 (Stages 18-19) is now complete | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -947,6 +948,68 @@ fraction on synthetic data, deferral rate demonstrably responds to the
 threshold (Stage 19's own named criterion), a zero-fraction edge case defers
 nothing, and the real retained-vs-overall accuracy claim above.
 
+**Stage 20 (`src/evaluation/overhead.py`, plus small additive instrumentation
+in `src/federated/client_app.py` and `client_app_secagg.py`) — overhead
+instrumentation (CLAUDE.md §11.2): communication and compute cost as a
+first-class measured output, not an afterthought. The first Phase 5 stage —
+the mode of work is starting to shift from "prove each mechanism works" to
+"produce the paper's actual numbers."**
+
+**Design**: `classifier_payload_size_bytes()` measures the real serialized
+size of a classifier-head update (the same `torch.save` mechanism
+`ArrayRecord` uses under the hood); `theoretical_payload_size_bytes()`
+computes the raw parameter-count lower bound for cross-checking (Stage 20's
+own testing criterion). `measure_wall_clock()`/`measure_peak_memory()` are
+small context managers. Wired into `client_app.py`'s `train()` and
+`client_app_secagg.py`'s `fit()` by wrapping exactly the local-training call
+(not feature loading, which is cached/amortized across rounds) — both now
+report `wall_clock_seconds` and `payload_bytes` in their per-round metrics,
+which Flower's own built-in aggregated-metrics logging already surfaces with
+zero further server-side changes needed.
+
+**Real live-run comparison — three real 5-round runs (natural partition, 3
+nodes), not estimates — this is what makes "DP's and SecAgg's overhead
+attributed separately" (CLAUDE.md's own explicit requirement) a real,
+checkable claim rather than a plan-only line item:**
+
+| Configuration | Client-side compute (median, wall_clock_seconds/round) | Payload bytes/round | Total round-trip time (5 rounds) |
+|---|---|---|---|
+| Baseline (no DP, no SecAgg) | ~0.45s | 1,053,900 (constant) | 18.03s (~3.61s/round) |
+| + Differential Privacy (ε=4) | ~7.50s (**~16.7x**) | 1,053,900 (**unchanged**) | 56.76s (~11.35s/round, **~3.1x**) |
+| + Secure Aggregation | — (masking happens outside the instrumented call) | — (measured indirectly via total time) | 20.30s (~4.06s/round, **~1.13x, ~13% overhead**) |
+
+**Real, reportable findings**: DP costs essentially nothing in communication
+(the payload size is bit-for-bit identical with or without DP-SGD — Opacus's
+per-sample clipping and noise addition happen entirely client-side before
+serialization) but costs roughly 16-17x more client-side compute time per
+round, driven by Opacus's per-sample gradient computation — a real, measured
+number for the paper, not the DP literature's general expectation asserted
+without checking. SecAgg's overhead is comparatively small at this project's
+scale (3 clients, ~1MB payload) — about 13% more total round time than plain
+FedAvg, consistent with the ablation table's own framing of row 4 vs. row 3
+as "cost of quantization and masking," expected to be modest for a
+small-federation payload this size. SecAgg's own client-side masking/
+quantization overhead isn't visible in `client_app_secagg.py`'s
+`wall_clock_seconds` metric specifically (Flower's `secaggplus_mod` wraps
+around, not inside, the instrumented `fit()` call) — the total-round-time
+comparison is what actually captures it, an intentional design choice over
+attempting to instrument inside Flower's own SecAgg+ protocol internals,
+which the plan's own risk section flags as needing care with the pinned
+version's hooks.
+
+**Payload size cross-check (Stage 20's own testing criterion)**: measured
+1,053,900 bytes vs. theoretical 1,051,656 bytes (262,914 trainable params ×
+4 bytes fp32, Stage 8's own validated count) — a ~0.21% serialization
+overhead, matching expectations (`torch.save`'s pickle/tensor-header
+overhead, never a large multiple).
+
+**6 new tests (140 total)**, `tests/test_overhead.py`: measured-vs-theoretical
+payload size using the real `DenseNet121Head` classifier (not synthetic
+tensors), the known Stage 8 parameter count (262,914) as a regression guard,
+payload size scaling with parameter count, wall-clock genuinely measuring a
+real delay (not returning zero), and peak memory reflecting a real
+allocation difference.
+
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
 (Isolation Forest OOD detection gate, scoped to chest-X-ray anomaly detection only, not
@@ -1036,21 +1099,24 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. Stage 19 is about to be committed on top of `9fcc8af`
-(Stage 18) — `src/uncertainty/{mc_dropout,deferral}.py` (new),
-`conf/experiment/uncertainty.yaml` (new), `tests/{test_mc_dropout,test_deferral}.py`
-(new), plus this file's update and a small CLAUDE.md §10 implementation
-note. No changes to `pyproject.toml`/`uv.lock` (no new dependencies — MC
-Dropout needs nothing beyond what's already pinned). Check `git log
---oneline -5` on resume — this file is not re-updated after every single
-commit within a session, only at natural pause points.
+**Branch:** `main`. Stage 20 is about to be committed on top of `f6256a2`
+(Stage 19) — `src/evaluation/overhead.py` (new), `tests/test_overhead.py`
+(new), `src/federated/client_app.py`/`client_app_secagg.py` (small additive
+instrumentation), plus this file's update. `pyproject.toml`'s
+`[tool.flwr.app.components]` was temporarily swapped to the SecAgg app pair
+for the live overhead-comparison run and **confirmed reverted** (`git diff
+pyproject.toml` showed no output before this commit — the swap-and-revert
+Stage 15 established). No changes to `pyproject.toml`'s config/`uv.lock`
+otherwise — no new dependencies. Check `git log --oneline -5` on resume —
+this file is not re-updated after every single commit within a session,
+only at natural pause points.
 
 ```
+f6256a2 Stage 19: Monte Carlo Dropout and deferral (DG-10 resolved) — Phase 4 complete
 9fcc8af Stage 18: Grad-CAM explainability
 3ece93a Stage 17: Docker Compose multi-client deployment
 e078cee Stage 16: TLS + client authentication (ADR-4)
 20cc551 Stage 15: Secure Aggregation via Flower SecAgg+ (ablation row 4)
-90bf95f Stage 14: Differential Privacy with formal accounting (ablation row 5) — DG-7 resolved
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -1062,50 +1128,57 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-**Stage 19 is complete — Phase 4 is entirely done.** DG-10 resolved
-(owner-approved 2026-08-30, asked explicitly rather than defaulted): fixed
-coverage target, defer the worst 10% by predictive entropy across T=20 MC
-Dropout passes. Unlike Grad-CAM (Stage 18), this stage produced **no
-implementation bugs** — all 9 new tests passed on their first real run
-against the real pooled test set and Stage 12's trained checkpoint. See §7's
-Stage 19 note for the full real numbers: retained-case accuracy (86.27%)
-meaningfully exceeds overall accuracy (83.17%) after deferring the worst 10%,
-and the deferred set's own accuracy (55.37%, barely above chance) confirms
-the mechanism genuinely isolates the hardest cases. Mean entropy is
-meaningfully higher on misclassified cases (0.613) than correct ones (0.371)
-— real, checkable evidence that even this documented-weaker (head-only)
-uncertainty estimator carries genuine signal.
+**Stage 20 is complete — real per-round communication and compute cost, DP's
+and SecAgg's overhead attributed separately, exactly per CLAUDE.md §11.2's
+requirement.** Three real live 5-round comparison runs (baseline, DP-enabled,
+SecAgg-enabled), not estimates. See §7's Stage 20 note for the full numbers:
+DP costs ~16.7x client-side compute time but zero communication overhead
+(payload size bit-for-bit identical with or without DP-SGD); SecAgg costs
+~13% more total round time than plain FedAvg — comparatively modest at this
+project's 3-client, ~1MB-payload scale. Measured payload (1,053,900 bytes)
+matches the theoretical parameter-count size (1,051,656 bytes) within ~0.21%,
+Stage 20's own named testing criterion.
 
-**Both Phase 4 stages (18, 19) are now complete — the entire "clinical trust
-layer" (explainability + confidence-aware deferral) is real, tested, and
-verified against real trained checkpoints, not just described.**
+**This closes out everything Stage 21 (the full ablation campaign) needs as
+a prerequisite**: per its own plan text, "Stages 11 through 17 and Stage
+20 — every layer must be verified individually before the campaign runs."
+Every one of those is now done, live-verified, with real numbers.
 
-Next is **Phase 5 — measurement and delivery**, starting with **Stage 20 —
-overhead instrumentation** (`REQ`, size not yet confirmed in this session's
-reading of the plan — check `docs/IMPLEMENTATION_PLAN.md`'s Stage 20
-write-up directly before scoping). Per CLAUDE.md §11.2, communication
-accounting (bytes transmitted per client per round, wall-clock per round) is
-supposed to be a "first-class measured output, not an afterthought," and
-CLAUDE.md's overhead-reporting requirement (§11.2) explicitly wants DP's and
-SecAgg's overhead attributed *separately*. None of Stages 13-17's live runs
-captured this instrumentation yet — it needs to be added and then likely
-re-run against at least a subset of the already-proven-working stages to
-produce real overhead numbers, not just wired in for future use.
+Next is **Stage 21 — the full ablation campaign** (`REQ`, **`L`-sized**) —
+per CLAUDE.md §11.1, "the ablation table is the paper," this is the single
+largest remaining piece of work and where nearly all of the paper's actual
+reportable numbers come from. What it needs: `conf/experiment/ablation_*.yaml`
+(experiment configs for all six ablation rows), `scripts/run_ablation.py` (a
+batch runner across rows × seeds × epsilon values), `src/evaluation/tables.py`
+(aggregation into publication-ready tables/figures — needs `matplotlib`,
+already pinned). Concretely still missing before a real campaign run: ≥3
+seeds per configuration for every row that doesn't have them yet (Stage 13's
+FedAvg run and most of Stages 14-17's validation runs used only 1 seed each,
+by design, since they were mechanism-verification runs, not measurement
+runs); the remaining DP epsilon sweep values {2, 8} (only 1 and 4 have real
+numbers so far); and the Dirichlet synthetic non-IID partitioning regime,
+which this entire session has not touched at all (only the natural/balanced
+hospital partitions have been used, per DG-3).
 
-After Stage 20 comes **Stage 21 — the full ablation campaign** (per
-CLAUDE.md §11.1, "the ablation table is the paper"): every row (1-6), proper
-round counts, ≥3 seeds, both partition regimes, the full epsilon sweep
-{1,2,4,8} (only 1 and 4 have real runs so far), and the Dirichlet synthetic
-non-IID sweep (not touched at all this session — only the natural/balanced
-hospital partitions have been used). This is the largest remaining piece of
-work and where most of the actual paper-reportable numbers will come from.
+**Real scoping questions Stage 21 will need the owner's input on, not
+something to assume silently**: exact seed set (CLAUDE.md §12 requires ≥3,
+Stage 11/12's precedent used {42, 123, 2024} — reuse those, or pick new
+ones?); how many rounds per configuration for the federated rows (Stage 13's
+real run used 20 rounds — is that the campaign's standard, or does DP/SecAgg
+warrant a different count given their much higher per-round cost just
+measured in Stage 20?); Dirichlet alpha value(s) and client count for the
+synthetic non-IID sweep (CLAUDE.md §14's own pending-decisions list already
+flags "client count for the Dirichlet synthetic sweep" as unresolved); and
+whether row 6 (the full combined system) is in scope for this campaign given
+Stage 17's finding that combining DP + SecAgg + TLS in one app requires real
+integration work first (reconciling Stage 15's legacy-API SecAgg app with
+the canonical Message-API app), which hasn't been done.
 
-No open decision gate is currently known to block Stage 20. Given Phase 4 is
-now fully closed out and Stage 20/21 represent a shift from "prove each
-mechanism works" (this session's dominant mode across Stages 8-19) to "run
-the real measurement campaign that produces the paper's numbers," **a
-check-in before starting Stage 20 is warranted** as a natural, substantial
-phase-boundary checkpoint — not because of a specific open gate, but because
-Stage 20 defines what gets measured and Stage 21 is a large, resource-intensive
-campaign (many seeds × many configurations) worth scoping deliberately with
-the owner rather than assumed.
+Given Stage 21's real size (`L`, the plan's own largest-class label,
+compute-bound on a 4GB laptop per the plan's own risk section) and the
+multiple real scoping questions above — none of which have obvious defaults
+the way most of Stages 8-20's implementation-detail decisions did — **a
+check-in before starting Stage 21 is clearly warranted**, not just as the
+established per-phase-boundary pattern but because this stage genuinely
+cannot be fully scoped without the owner's input on seed count, round count,
+and Dirichlet parameters specifically.
