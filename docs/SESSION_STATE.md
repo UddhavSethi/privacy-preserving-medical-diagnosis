@@ -1513,3 +1513,33 @@ addition (145 + 11 new).
 
 No new dependency, no architecture change — pure post-hoc analysis over
 already-saved checkpoints (matplotlib, numpy, sklearn all already pinned).
+
+**OPT-2 — Empirical privacy attacks: complete.**
+`src/evaluation/privacy_attack.py` (loss-based membership inference attack,
+Yeom et al. 2018 — deliberately NOT shadow-model MIA or gradient inversion,
+see the module's own scope note), `tests/test_privacy_attack.py` (9 tests,
+constructed known-answer cases: identical member/non-member distributions
+-> AUROC~0.5, trivially separable losses -> AUROC~1.0/0.0),
+`scripts/run_privacy_attack.py` (post-hoc, same already-trained checkpoints
+as OPT-1: centralized ceiling, FedAvg no-DP, DP epsilon sweep), 2 figures,
+`docs/privacy_attack.md`.
+
+**Real result, reported carefully per the plan's own risk note ("a weak
+attack proves nothing, so a negative result must not be over-claimed as
+evidence that DP works"):** every configuration's attack AUROC sits within
+~1 percentage point of 0.5 (no exploitable signal), INCLUDING the fully
+undefended centralized model (0.5084 +/- 0.0011 — the only row with a
+small, seed-consistent, above-chance signal, which is itself the sanity
+check that the attack has genuine if limited sensitivity). FedAvg
+(with or without DP) shows no attack signal above chance at all, and DP
+configurations show a NEGATIVE generalization gap (member loss slightly
+HIGHER than non-member loss) — a real, monotonic trend within the epsilon
+sweep (attack AUROC 0.4952 at eps=1 rising toward 0.4994 at no-DP), but one
+whose absolute magnitude never leaves the 0.49-0.51 band. `docs/
+privacy_attack.md` deliberately does NOT conclude "DP is unnecessary" or
+"this proves no leakage" — it states both legitimate readings (genuinely
+low memorization given ADR-1's small, heavily-regularized head, vs. this
+specific simple attack being too weak to detect leakage a stronger method
+might find) and names a stronger attack as the natural next step, not
+implemented here. 165/165 tests passing (156 + 9 new). No new dependency,
+no architecture change.

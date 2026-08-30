@@ -57,6 +57,7 @@ dataset, and why.
 | `docs/threat_model.md` | Threat actors, protection layers, known architectural tensions |
 | `docs/results.md` | The ablation table, figures, and interpretation |
 | `docs/calibration.md` | OPT-1: ECE, Brier score, and risk-coverage analysis of MC Dropout confidence |
+| `docs/privacy_attack.md` | OPT-2: empirical membership-inference attack against trained checkpoints |
 | `docs/reproducibility.md` | How every reported number traces to a config/seed/MLflow run |
 | `Review_1_Privacy_Preserving_FL_Diagnosis.pptx` | Original project proposal (do not modify) |
 
