@@ -578,8 +578,8 @@ OPT-6) not started — optional, requires separate approval per §16.1.**
 |---|---|
 | Source deck studied and analyzed | Done |
 | Technology stack reviewed and approved | Done |
-| CLAUDE.md (this document) | Done — awaiting owner approval |
-| Git repository | Initialized, remote configured, **no commits yet** |
+| CLAUDE.md (this document) | Done — owner-approved, actively governing the project |
+| Git repository | Initialized, remote configured, active history on `main`, pushed to origin |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
 | Code | All of Phases 0–5 (Stages 0–23) complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live; the full ablation campaign (Stage 21) ran 27/27 real live federated runs (3 seeds each) and produced the complete ablation table with real numbers for every row — local/centralized baselines, FedAvg (natural+balanced), FedAvg+SecAgg, FedAvg+DP (full epsilon sweep {1,2,4,8}, cleanly monotonic), and a supplementary Dirichlet synthetic non-IID sweep. Row 6 (full combined system) deliberately deferred — needs real integration work not yet done. Stage 22 audited the test suite against every CLAUDE.md §11.3 requirement (all already covered except the integration smoke test, now added) and added optional CI. Stage 23 produced the full documentation/reproducibility package (`README.md`, `docs/threat_model.md`, `docs/results.md`, `docs/reproducibility.md`, `docs/figures/`), including finding and fixing a real MLflow data-contamination bug in the integration smoke test. See `docs/SESSION_STATE.md` for current detail and the full table; this table is a coarse summary. |
