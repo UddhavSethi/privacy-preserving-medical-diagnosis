@@ -164,8 +164,9 @@ re-asserted by a dedicated test against the live files).
 | 9 — Frozen-backbone feature cache | **Done.** DG-5 resolved (K=5 augmented views). 62/62 tests passing (5 new). Full cache built and measured — see note below the table. | `dfb1d9f` |
 | 10 — Evaluation and metrics module | **Done.** 85/85 tests passing (23 new). No open decision gates. See note below the table. | `ece7535` |
 | 11 — Local single-hospital baseline (ablation row 1) | **Done.** 94/94 tests passing (8 new + 1 partitioning regression test). Real results below — no architecture concerns triggered. | `c57ed27` |
-| 12 — Centralized pooled baseline (ablation row 2) | **Done.** 97/97 tests passing (3 new). Centralized model matched/exceeded every local baseline — all [OK]. See note below the table. | (pending commit this session) |
-| 13–23 | Not started | — |
+| 12 — Centralized pooled baseline (ablation row 2) | **Done.** 97/97 tests passing (3 new). Centralized model matched/exceeded every local baseline — all [OK]. See note below the table. | `f684195` |
+| 13 — Flower FedAvg in simulation (ablation row 3) | **Done — real 20-round FedAvg run completed end-to-end.** 101/101 tests passing (4 new). No privacy layers yet (by design — DP/SecAgg/TLS come next). Several real Flower-tooling issues hit and fixed; see note below the table. | (pending commit this session) |
+| 14–23 | Not started | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -299,8 +300,95 @@ expected for a blended test set — not itself a concern.
 against synthetic fixtures mirroring the real on-disk structure (shape checks,
 hospital-filtering correctness, pooling concatenation).
 
-**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), and all of Phase 2 (Stages
-6–12) are now complete.** Stage 13 (Flower FedAvg in simulation) starts Phase 3.
+**Stage 13 (`src/federated/{client_app,server_app,serialization,strategy}.py`,
+`conf/federated/fedavg.yaml`) — the first real federated round ever run in this
+project, via `flwr run .` (Flower's actual simulation runtime, not a mocked test).**
+
+Real 20-round FedAvg run, natural partition, 3 simulated nodes (A/B/C), 1 local epoch
+per round, lr=0.001, `Adam` on the classifier only (backbone never transmitted —
+ADR-1's head-only federated payload, ~1MB `ArrayRecord`). Round 0 is the random-init
+model; round 1 already jumps to 0.79 pooled test AUROC from a single round.
+Client-side val AUROC (federated-weighted across clients) climbs steadily to ~0.86 and
+plateaus; pooled test AUROC plateaus around 0.80–0.83.
+
+**The headline check — federated vs. local vs. centralized, same per-hospital test
+sets throughout (final round's saved checkpoint, evaluated post-hoc):**
+
+| Hospital | Local (Stage 11) | Centralized (Stage 12) | FedAvg (Stage 13) |
+|---|---|---|---|
+| A (Kermany) | 0.9849 | 0.9793 | 0.9482 |
+| B (RSNA) | 0.8339 | 0.8377 | 0.8320 |
+| C (RSNA) | 0.8584 | 0.8621 | 0.8574 |
+
+**Honest finding, not a red flag: FedAvg does not beat local/centralized here** — it
+lands close to both (within ~1-4 points), slightly below on every hospital, most
+noticeably on Kermany (A), which already does very well locally on its own clean,
+small dataset and has the least to gain from federating with two harder, differently-
+distributed RSNA shards. This is a well-known, expected, and reportable non-IID
+federation-cost finding — exactly what the ablation table (row 3 vs. rows 1/2) exists
+to quantify, not a system malfunction. Only 20 rounds x 1 local epoch were run; more
+rounds/epochs or FedAvg tuning were not attempted, since finding this exact number was
+the goal, not chasing a specific outcome.
+
+4 new tests (101 total): serialization round-trip losslessness (dtype/shape/values),
+and single-client-round determinism/reproducibility (a real bug was found and fixed
+here too — `train_local_round` originally only seeded a local `Generator` for
+shuffle/view-selection, leaving Dropout's mask draw on the *global* torch RNG
+unseeded, so two "identical" calls silently diverged; fixed by also calling
+`torch.manual_seed(seed)`, matching how Stage 11/12's `train_classifier` already
+achieves full reproducibility via `set_global_seed`).
+
+**Real Flower-tooling issues hit and fixed while implementing this stage — exactly
+the kind of API churn ADR-5 warned about, worth knowing before touching Stages 14-17:**
+1. **The Message API (`@app.train()`/`@app.evaluate()`/`@app.main()`, `ArrayRecord`,
+   `MetricRecord`, `RecordDict`, `Grid`, `strategy.start()`) has fully superseded the
+   old `NumPyClient`/`client_fn` style** at flwr 1.35.0. Verified by generating a real
+   official app skeleton with `flwr new @flwrlabs/quickstart-pytorch` against the
+   pinned CLI (not by trusting web docs, which can drift from the exact pinned
+   version) — this is the reliable way to check Flower's current API going forward.
+2. **`flwr run` requires a persistent local "SuperLink" control-plane daemon**, even
+   for pure local simulation — auto-started on first run, but it's a real background
+   process (`flower-superlink`, `flower-superexec`) that outlives the `flwr run`
+   command and can accumulate stale state if a run is killed mid-flight. If a future
+   run hangs or errors mysteriously, check `pgrep -af flower-super`, kill it, delete
+   `~/.flwr/local-superlink/state.db*`, and retry clean.
+3. **Default simulated SuperNode count changed from 10 to 2 as of flwr>=1.32** — this
+   project needs 3 (one per hospital). Must pass
+   `--federation-config "num-supernodes=3"` explicitly every run, or configure it
+   permanently via `flwr federation simulation-config`.
+4. **The FAB (Flower App Bundle) has a hard 10MB size limit**, and its default
+   include patterns (`**/*.py`, `**/*.json`, `**/*.yaml`, etc.) matched far more than
+   intended: `.venv`'s installed packages (~350MB of matching files) and
+   `data/*.json` (multi-MB partition files) both got swept in. Fixed with a positive
+   `fab-include = ["src/**/*.py", "pyproject.toml"]` allowlist in `[tool.flwr.app]`
+   rather than trying to exclude everything unwanted.
+5. **That `fab-include` key must be a direct child of `[tool.flwr.app]`** — placing
+   it after `[tool.flwr.app.components]`'s keys silently nested it under
+   `.components` instead (TOML tables extend to the next `[header]`), and Flower
+   simply ignored the unrecognized key with no error. If a config key seems to have
+   no effect, check with `flwr.cli.config_utils.load_and_validate` directly rather
+   than assuming placement was correct.
+6. **`[project].name` doubles as the Flower App name**, which has a hard 32-character
+   limit with no override — `privacy-preserving-medical-diagnosis` (37 chars) had to
+   be shortened to `pneumonia-fl` (cosmetic only; nothing imports the package by this
+   name).
+7. **`fab-format-version = 1` requires a declared `[project].license` file** —
+   omitted rather than inventing a license unilaterally (a real decision, not a
+   build-tool formality); version defaults to `0` without it, which works fine
+   locally.
+8. **Flower's simulation runtime copies the app's source into an isolated directory**
+   (`~/.flwr/apps/<app-id>/`) and executes it from there — any relative path, or any
+   `Path(__file__).resolve().parents[N]`-style "repo root" computation (the pattern
+   every other script in this project uses), silently resolves against the wrong
+   directory. Fixed by passing `partition-path`, `feature-cache-dir`, and
+   `output-checkpoint` as **absolute paths** via `[tool.flwr.app.config]`, explicitly
+   threaded through `context.run_config` into `client_app.py`/`server_app.py` rather
+   than relying on any default. This is specific to `flwr run`'s simulation
+   execution — Stage 17's deployment engine is a different execution mode and will
+   need its own path handling.
+
+**Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), all of Phase 2 (Stages 6–12),
+and Phase 3's Stage 13 are now complete.**
 
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
@@ -335,6 +423,19 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 9. Known state / things to be aware of (not bugs, but worth knowing)
 
+- **`pyproject.toml`'s `[project].name` changed from `privacy-preserving-medical-diagnosis`
+  to `pneumonia-fl`** (Stage 13) — Flower's `[tool.flwr.app]` reuses this field as the
+  Flower App name, which has a hard 32-char limit with no override. Purely cosmetic;
+  nothing imports the package by name. `flwr[simulation]==1.35.0` (was `flwr==1.35.0`)
+  and its `ray`/`msgpack` sub-dependencies were added — needed to actually run
+  simulations, part of the already-approved "Simulation" execution mode (CLAUDE.md
+  §3.3), not a new architectural choice.
+- **A persistent local Flower "SuperLink" daemon** (`flower-superlink`,
+  `flower-superexec`) auto-starts on the first `flwr run` and stays running across
+  invocations, with state in `~/.flwr/local-superlink/`. If a future federated run
+  hangs or errors mysteriously, check `pgrep -af flower-super`, `pkill -9` it, delete
+  `~/.flwr/local-superlink/state.db*`, and retry — see Stage 13's note under §7 for
+  the full list of Flower-tooling issues hit this session.
 - **~62.5GB of data on local disk, all gitignored, none of it committed**:
   `data/raw/kermany` (1.2G), `data/raw/rsna` (3.8G), `data/_downloads/ZhangLabData.zip`
   (7.9G, kept for provenance), `data/_downloads/rsna-pneumonia-detection-challenge.zip`
@@ -371,17 +472,19 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. `c57ed27` (Stage 11) is pushed to `origin/main`; Stage 12
-(`src/training/trainer.py` load_pooled_features addition, `scripts/train_centralized.py`,
-`conf/experiment/centralized.yaml`, `tests/test_trainer.py` additions, this file's
-update) is about to be committed as the next commit on top of that. Check
-`git log --oneline -5` on resume — this file is not re-updated after every single
-commit within a session, only at natural pause points.
+**Branch:** `main`. `f684195` (Stage 12) is pushed to `origin/main`; Stage 13
+(`src/federated/{client_app,server_app,serialization,strategy}.py`,
+`conf/federated/fedavg.yaml`, `pyproject.toml`/`uv.lock` — `flwr[simulation]` extra,
+`[tool.flwr.app]` config, project rename — `tests/test_federated.py`,
+`src/training/trainer.py`'s `train_local_round` addition/fix, this file's update) is
+about to be committed as the next commit on top of that. Check `git log --oneline -5`
+on resume — this file is not re-updated after every single commit within a session,
+only at natural pause points.
 
 ```
+f684195 Stage 12: centralized pooled baseline (ablation row 2) — Phase 2 complete
 c57ed27 Stage 11: local single-hospital baseline (ablation row 1)
 099e320 Fix: RSNA shard split (Stage 5) reused Stage 4's split seed, correlating shard membership with train/val/test membership
-ece7535 Stage 10: evaluation and metrics module
 dfb1d9f Stage 9: frozen-backbone feature cache — DG-5 resolved (K=5 views)
 5b52bc0 Record OPT-5 (Isolation Forest OOD gate) and OPT-6 (Streamlit demo) as approved-in-concept optional extensions
 80f533d Stage 8: DenseNet121 frozen backbone + head — ADR-1 validated
@@ -398,28 +501,35 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-**All of Phase 2 (Stages 8–12) is complete.** ADR-1 validated, feature cache built,
-metrics module in place, local baseline and centralized baseline both trained with
-real, healthy numbers and no architecture concerns anywhere (see the tables under
-§7's Stage 11/12 notes). No open decision gates remain in Phases 0–2.
+**Stage 13 is complete — FedAvg works, verified with a real 20-round run, not a mock.**
+Both make-or-break stages in the whole project (8 and 13) are now cleared. See §7's
+Stage 13 note for the full real-numbers comparison (FedAvg lands close to but slightly
+below local/centralized on every hospital — an honest, expected non-IID finding, not
+a red flag) and the list of real Flower-tooling issues found and fixed.
 
-Next is **Stage 13 — Flower FedAvg in simulation** (`REQ`, **`L`-sized**, **ablation
-row 3**) — this starts **Phase 3 (Federated core)** and is the actual FL gate: no
-`ClientApp`, `ServerApp`, or FedAvg strategy code exists anywhere in this project yet
-(confirmed directly, not from memory, during the OOD-gate/Streamlit architecture audit
-earlier this session). Everything built so far (Stages 0–12) is data/model/baseline
-infrastructure that Stage 13 is the first to actually federate.
+Next is **Stage 14 — Differential Privacy with formal accounting** (`REQ`,
+**`L`-sized**, **ablation row 5**, **Decision Gate DG-7**) — per CLAUDE.md's strict
+ordering rule, this can only start now that FedAvg is verified working DP-free, which
+Stage 13 just did. What it needs: `src/privacy/dp.py` (Opacus `PrivacyEngine` inside
+the client fit loop — this means reworking `client_app.py`'s `train()` to wrap the
+per-sample-gradient path Stage 8 already validated, not `train_local_round`'s current
+plain-Adam loop), `src/privacy/accounting.py` (an accountant that accumulates budget
+**across rounds**, not just within one — CLAUDE.md flags this as the classic silent
+bug in FL+DP work), `conf/privacy/dp_*.yaml`. `BatchMemoryManager` for the 4GB VRAM
+budget (Stage 8 already proved headroom exists — 0.37GB/4GB at batch 32 for a single
+DP-SGD step — but that was a single client in isolation, not 3 simulated nodes
+possibly running concurrently under Ray).
 
-**This is a meaningfully bigger step than anything done so far** — the plan flags
-Stage 13 as one of only two "make-or-break" points in the whole project (alongside
-Stage 8, already cleared), and its own headline check is *"does the federated model
-beat the best single-hospital local model?"* — the project's core value proposition.
-Per CLAUDE.md's own strict ordering rule, no DP (14), SecAgg (15), or TLS (16) may be
-built before FedAvg is verified working DP-free here first.
+**DG-7, open and blocking real progress here**: target epsilon values for the sweep,
+and delta relative to dataset size — CLAUDE.md §14 already lists this as a pending
+decision (not resolved by anything done this session). **Raise this with the owner
+before implementing**, the same way DG-2/DG-3/DG-5 were — don't default silently.
 
-**A fresh session (or this one, resuming after a pause) should confirm with the owner
-before starting Stage 13** rather than assuming the "continue, complete this phase"
-authorization from Phase 2 carries forward automatically — Phase 3 is real federated
-learning + differential privacy + secure aggregation + TLS work, a different order of
-architectural weight than the model/baseline work just finished, and CLAUDE.md's own
-governance treats decisions like this as worth a check-in, not a silent continuation.
+**This is another substantial stage** (`L`-sized, like Stage 13) introducing a new
+approved-but-unused dependency path (Opacus's `PrivacyEngine`, not just
+`ModuleValidator`) into the live federated training loop for the first time. Given how
+much has been built this session (Stages 8 through 13, six stages including two
+make-or-break gates), **a fresh check-in with the owner before starting Stage 14 is
+warranted** rather than assuming continuation — both because of DG-7 and because
+Phase 3's remaining stages (14 DP, 15 SecAgg, 16 TLS, 17 Docker deployment) are the
+project's actual privacy/security claims, not more baseline infrastructure.

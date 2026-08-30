@@ -565,11 +565,11 @@ touch them.
 | Technology stack reviewed and approved | Done |
 | CLAUDE.md (this document) | Done — awaiting owner approval |
 | Git repository | Initialized, remote configured, **no commits yet** |
-| Dependency file | Not created |
+| Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0 (Stages 0–2), Phase 1 (Stages 3–5), and Phase 2 Stages 6–8 (preprocessing, transforms/Dataset, frozen-backbone model — ADR-1 validated) complete |
+| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), and Phase 3's Stage 13 complete — FedAvg verified working end-to-end (real 20-round run) with no privacy layers yet. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
 | Docker configuration | None |
-| Tests | 57 passing |
+| Tests | 101 passing |
 
 ### Resolved decisions
 

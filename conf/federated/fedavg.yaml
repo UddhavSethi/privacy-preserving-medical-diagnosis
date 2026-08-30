@@ -1,0 +1,17 @@
+# Stage 13 — Flower FedAvg in simulation (ablation row 3). No privacy layers yet.
+#
+# This is a reference copy of the values also set in pyproject.toml's
+# [tool.flwr.app.config] — Flower's `flwr run` reads the TOML, not this file, but this
+# keeps the federated hyperparameters documented alongside every other stage's config
+# per this project's Hydra convention. If the two drift, pyproject.toml is
+# authoritative (it's what actually runs).
+
+partition_path: data/partitions/hospitals_natural.json # natural regime — matches Stages 11/12's primary rows
+num_hospitals: 3 # A, B, C -> partition-id 0, 1, 2
+
+num_server_rounds: 20
+local_epochs: 1 # per round, per client — federated rounds use many small local steps, not train-to-convergence
+learning_rate: 0.001
+batch_size: 32
+fraction_evaluate: 1.0 # every available client evaluates each round
+seed: 42
