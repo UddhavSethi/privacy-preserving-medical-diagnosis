@@ -1543,3 +1543,41 @@ specific simple attack being too weak to detect leakage a stronger method
 might find) and names a stronger attack as the natural next step, not
 implemented here. 165/165 tests passing (156 + 9 new). No new dependency,
 no architecture change.
+
+**OPT-3 — Quantitative Grad-CAM evaluation: complete.**
+`src/evaluation/gradcam_eval.py` (pointing game + IoU against ground-truth
+boxes, Zhang et al. 2018), `tests/test_gradcam_eval.py` (12 tests,
+hand-computed known-answer overlaps), `scripts/run_gradcam_evaluation.py`
+(real Grad-CAM computation — not cached features, a full backbone
+forward+backward pass per image — over a fixed seeded subsample of 300 of
+902 eligible RSNA test-set boxed pneumonia-positive images, same 7-config
+x 3-seed checkpoint set as OPT-1/OPT-2), 2 figures,
+`docs/gradcam_localization.md`. Real bounding boxes are NOT retained
+anywhere in the existing pipeline (`src/data/labels.py::load_rsna_records`
+dedupes to one record per patientId and keeps only Target, dropping
+x/y/width/height) — this script reads them directly from the raw
+`stage_2_train_labels.csv`, joined by patientId, without touching the
+approved Stage 4 pipeline. Ran as a genuinely long background job (~12 min
+of real Grad-CAM computation, 7 x 3 x 300 images); a `nohup ... &` combined
+with the harness's own `run_in_background` double-backgrounded it and the
+harness reported completion prematurely (the shell returned immediately
+because of the redundant trailing `&`) — caught by checking
+`pgrep`/`outputs/results/` before trusting the "completed" notification,
+then waited out properly with a blocking `kill -0` poll loop on the real
+PID. Note for next time: don't combine `nohup cmd &` with
+`run_in_background: true` — pick one.
+
+**Real result:** absolute localization quality is modest everywhere
+(pointing-game tops out ~0.18 even for the privacy-free centralized
+ceiling) — expected given Grad-CAM's coarse final-block target layer and
+pneumonia's often-diffuse presentation, not an implementation problem.
+No mean-level DP effect is confidently resolvable (wide, heavily
+overlapping confidence intervals). The real, previously-unmeasured finding
+is about VARIANCE: every DP configuration's seed-to-seed std is 3-10x
+larger than the non-DP configurations', traced to one specific seed (42)
+scoring much lower at every epsilon despite comparable classification
+AUROC/calibration at that same seed (cross-referenced against docs/
+results.md and docs/calibration.md) — DP appears to destabilize WHERE the
+model's explanation attributes its decision, across seeds, independent of
+whether it destabilizes accuracy. 177/177 tests passing (165 + 12 new). No
+new dependency, no architecture change.
