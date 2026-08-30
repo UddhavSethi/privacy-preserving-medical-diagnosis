@@ -166,8 +166,9 @@ re-asserted by a dedicated test against the live files).
 | 11 — Local single-hospital baseline (ablation row 1) | **Done.** 94/94 tests passing (8 new + 1 partitioning regression test). Real results below — no architecture concerns triggered. | `c57ed27` |
 | 12 — Centralized pooled baseline (ablation row 2) | **Done.** 97/97 tests passing (3 new). Centralized model matched/exceeded every local baseline — all [OK]. See note below the table. | `f684195` |
 | 13 — Flower FedAvg in simulation (ablation row 3) | **Done — real 20-round FedAvg run completed end-to-end.** 101/101 tests passing (4 new). No privacy layers yet (by design — DP/SecAgg/TLS come next). Several real Flower-tooling issues hit and fixed; see note below the table. | (pending commit this session) |
-| 14 — Differential Privacy with formal accounting (ablation row 5) | **Done — DG-7 resolved and applied.** Opacus DP-SGD wired into `client_app.py` as a config-switchable layer (`dp-enabled`, default `false`; Stage 13's no-DP path untouched). 111/111 tests passing (10 new). Two real live `flwr run` DP runs at epsilon=4 and epsilon=1, confirming the expected privacy-utility tradeoff. See note below the table. | (pending commit this session) |
-| 15–23 | Not started | — |
+| 14 — Differential Privacy with formal accounting (ablation row 5) | **Done — DG-7 resolved and applied.** Opacus DP-SGD wired into `client_app.py` as a config-switchable layer (`dp-enabled`, default `false`; Stage 13's no-DP path untouched). 111/111 tests passing (10 new). Two real live `flwr run` DP runs at epsilon=4 and epsilon=1, confirming the expected privacy-utility tradeoff. See note below the table. | 90bf95f |
+| 15 — Secure Aggregation with Flower SecAgg+ (ablation row 4) | **Done — real live `flwr run` with SecAgg+ actually masking updates.** SecAgg+ at flwr==1.35.0 only integrates via Flower's legacy Strategy/workflow API (not Stage 13/14's Message-API `strategy.start()`), confirmed against installed source + Flower's own reference example — a genuine API-surface finding, raised with and approved by the owner before implementation. Separate `client_app_secagg.py`/`server_app_secagg.py` app pair. 114/114 tests passing (3 new). See note below the table. | (pending commit this session) |
+| 16–23 | Not started | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -480,8 +481,106 @@ zero-noise DP-SGD still sensibly reduces loss on separable synthetic data, and t
 returned classifier state loads cleanly into a plain unwrapped classifier with no
 leftover Opacus `_module.` prefix).
 
+**Stage 15 (`src/federated/{client_app_secagg,server_app_secagg}.py`,
+`tests/test_secagg.py`, `pyproject.toml`'s Stage 15 config keys) — Secure
+Aggregation via Flower SecAgg+ (ADR-3), ablation row 4.**
+
+**Real, material API-surface finding, verified against flwr==1.35.0's actual
+installed source (not memory/docs — ADR-5) and raised with the owner before
+writing code, per CLAUDE.md's "STOP and ask" rule for implementation-approach
+conflicts:** SecAgg+ is only wired through Flower's *legacy* server pipeline
+at this pinned version — `SecAggPlusWorkflow` requires a `LegacyContext`, an
+old-style `flwr.server.strategy.Strategy` (not the new
+`flwr.serverapp.strategy.FedAvg` Stage 13/14 use), and `DefaultWorkflow`,
+called directly as `workflow(grid, legacy_context)`. It has **not** been
+ported to the new Message-API `strategy.start(grid=...)` loop — confirmed via
+source inspection (`flwr.server.compat`, `flwr.server.workflow`) and
+cross-checked against Flower's own official
+`examples/flower-secure-aggregation` reference app (fetched from
+`flwrlabs/flower` on GitHub via `gh api`), which uses exactly this
+`LegacyContext`/`DefaultWorkflow(fit_workflow=SecAggPlusWorkflow(...))`
+pattern from inside an `@app.main()` function. Flower's own "Upgrade to
+Message API" doc doesn't mention SecAgg+ at all, confirming no documented
+migration path exists yet. **Owner approved proceeding with the legacy-API
+path** (the only ADR-3-compliant option — no custom crypto) via an explicit
+choice, 2026-08-30.
+
+**A second, deeper finding surfaced during implementation** (not covered in
+the initial owner check-in, since it only became clear once building the
+client side): `secaggplus_mod`'s handshake is driven through Flower's
+`flwr.compat` glue, which packs/unpacks messages under `fitins.parameters` /
+`fitres.parameters` RecordDict keys — a different wire format from Stage
+13/14's Message-API convention (`msg.content["arrays"]`,
+`RecordDict({"arrays": ..., "metrics": ...})`). Since a `ClientApp` can only
+be built with `client_fn` (legacy) *or* the new `@app.train()`/`@app.evaluate()`
+decorators — never both (`ClientApp.__init__`'s `_call` short-circuits
+`_registered_funcs` entirely when `client_fn` is set) — SecAgg+ cannot be a
+runtime config flag inside the existing `client_app.py`; it structurally
+requires its own `ClientApp` built the legacy `NumPyClient` + `client_fn` +
+`mods=[secaggplus_mod]` way, matching the official example exactly. This is
+why Stage 15 ships as a **fully separate app pair**
+(`client_app_secagg.py`/`server_app_secagg.py`), not a branch in
+`client_app.py`/`server_app.py` the way Stage 14's `dp-enabled` flag was.
+
+**Operational consequence — how to actually run this stage**: `pyproject.toml`'s
+`[tool.flwr.app.components]` points at Stage 13/14's canonical
+`server_app.py`/`client_app.py` by default (covers ablation rows 1/2/3/5/6).
+To run row 4 (this stage), temporarily edit `[tool.flwr.app.components]` to:
+```
+serverapp = "src.federated.server_app_secagg:app"
+clientapp = "src.federated.client_app_secagg:app"
+```
+run `flwr run`, then **revert it back** before committing — verified via
+`git diff pyproject.toml` after each validation run this session. A future
+session picking this project back up must know this swap-and-revert pattern
+exists; it is not a one-off, it is how ablation row 4 is run every time.
+
+**Real bug found via the live validation run, not by inspection**:
+`SecAggPlusWorkflow`'s own weight-encoding math (`ratio = num_examples /
+max_weight`) silently triggered its "potential overflow" warning every round
+— its default `max_weight=1000.0` is far below this project's real
+per-hospital train counts (Hospital B/C's natural shards are ~13,342 each).
+Fixed by adding `max-weight = 20000` to `pyproject.toml`'s Stage 15 config
+block and threading it into `SecAggPlusWorkflow(..., max_weight=...)`
+explicitly rather than relying on the library default. Confirmed the warning
+disappeared and results stayed sensible on re-run.
+
+**Real live validation — 3-round `flwr run` with SecAgg+ actually masking
+every client's update (not mocked)**, natural partition, 3 nodes, after the
+`max_weight` fix:
+
+| Round | pooled_test_auroc (SecAgg+) |
+|---|---|
+| 0 (init) | 0.2919 |
+| 1 | 0.8048 |
+| 2 | 0.8089 |
+| 3 | 0.8126 |
+
+Tracks Stage 13's plain-FedAvg trajectory closely (round 1 ~0.79-0.80 in both;
+Stage 13 by round 3 is in the same ~0.80-0.81 band) — exactly what ablation
+row 4 vs. row 3 should show: SecAgg+'s only expected cost is quantization
+noise, not a change in what's being learned, and that's what these numbers
+demonstrate.
+
+**"Masks cancel exactly" (CLAUDE.md §11.3's own named test) — 3 new tests,
+`tests/test_secagg.py` (114 total)**: replicates the *exact* client-side
+quantize/weight-encode (`secaggplus_mod`) and server-side
+unmask/dequantize (`secaggplus_workflow.unmask_stage`) math using Flower's own
+functions (`quantize`, `dequantize`, `factor_combine`, `factor_extract`,
+`parameters_addition`, `parameters_mod`), for synthetic multi-client scenarios
+with realistic (and deliberately skewed) per-hospital weights — but
+deliberately skips generating/exchanging the actual pairwise/private masks,
+since their exact cancellation is Flower's own tested cryptographic guarantee
+(Shamir secret sharing + ECDH), not something to re-derive per ADR-3. What's
+tested is the part specific to this project's usage: that the
+quantize-encode-sum-unmask-decode round-trip reproduces the same weighted
+average plain FedAvg would compute, with only quantization-level error, not
+some other integration bug. A third test isolates `quantize`/`dequantize`
+alone to confirm the round-trip error is real (lossy, non-vacuous) but
+correctly bounded.
+
 **Phase 0 (Stages 0–2), all of Phase 1 (Stages 3–5), all of Phase 2 (Stages 6–12),
-and Phase 3's Stages 13–14 are now complete.**
+and Phase 3's Stages 13–15 are now complete.**
 
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
@@ -568,26 +667,22 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. Stage 13 and Stage 14 are both about to be committed together as
-the next commit(s) on top of `f684195` (Stage 12) — Stage 13
-(`src/federated/{client_app,server_app,serialization,strategy}.py`,
-`conf/federated/fedavg.yaml`, `pyproject.toml`/`uv.lock` — `flwr[simulation]` extra,
-`[tool.flwr.app]` config, project rename — `tests/test_federated.py`,
-`src/training/trainer.py`'s `train_local_round` addition/fix) and Stage 14
-(`src/privacy/{dp,accounting}.py`, `client_app.py`/`server_app.py`'s DP wiring,
-`pyproject.toml`'s DP config keys, `tests/test_dp.py`, `tests/test_accounting.py`),
-plus this file's update. Check `git log --oneline -5` on resume — this file is not
-re-updated after every single commit within a session, only at natural pause points.
+**Branch:** `main`. Stage 15 is about to be committed on top of `90bf95f` (Stage 14)
+— `src/federated/{client_app_secagg,server_app_secagg}.py` (new),
+`tests/test_secagg.py` (new), `pyproject.toml`'s Stage 15 config keys
+(`num-shares`/`reconstruction-threshold`/`max-weight`), plus this file's update.
+`[tool.flwr.app.components]` was temporarily swapped to the secagg app pair for
+live validation and **has been reverted** to the canonical Stage 13/14 app —
+confirmed via `git diff pyproject.toml` before this commit. Check
+`git log --oneline -5` on resume — this file is not re-updated after every
+single commit within a session, only at natural pause points.
 
 ```
+90bf95f Stage 14: Differential Privacy with formal accounting (ablation row 5) — DG-7 resolved
+915dae5 Stage 13: Flower FedAvg in simulation — FedAvg verified end-to-end (ablation row 3)
 f684195 Stage 12: centralized pooled baseline (ablation row 2) — Phase 2 complete
 c57ed27 Stage 11: local single-hospital baseline (ablation row 1)
 099e320 Fix: RSNA shard split (Stage 5) reused Stage 4's split seed, correlating shard membership with train/val/test membership
-dfb1d9f Stage 9: frozen-backbone feature cache — DG-5 resolved (K=5 views)
-5b52bc0 Record OPT-5 (Isolation Forest OOD gate) and OPT-6 (Streamlit demo) as approved-in-concept optional extensions
-80f533d Stage 8: DenseNet121 frozen backbone + head — ADR-1 validated
-dda0bed Stage 7: torchvision transforms, Dataset and DataLoader
-91d7da8 Stage 6: OpenCV CLAHE preprocessing and cache (ADR-6)
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -599,34 +694,41 @@ unsure, ask before pushing through a later phase boundary unprompted.
 
 ## 11. Exact next recommended step
 
-**Stage 14 is complete — DP-SGD works, DG-7 is resolved, and both are verified with
-two real live `flwr run` executions (epsilon=4 and epsilon=1), not mocks.** Every
-make-or-break/high-risk stage so far (8, 13, 14) is now cleared. See §7's Stage 14
-note for the full real-numbers privacy-utility comparison and the four real bugs
-found and fixed (accountant-type mismatch, `OverflowError` on near-zero noise, the
-Opacus re-wrap guard validating the fresh-model-per-round design, and the
-Adam-confounded test-design lesson).
+**Stage 15 is complete — SecAgg+ actually masks every client's update, verified
+with a real live `flwr run` (3 rounds, natural partition), not mocks.** Every
+make-or-break/high-risk stage so far (8, 13, 14, 15) is now cleared. See §7's
+Stage 15 note for: the real API-surface finding (SecAgg+ only integrates via
+Flower's legacy Strategy/workflow API at flwr==1.35.0, requiring a fully separate
+`client_app_secagg.py`/`server_app_secagg.py` app pair rather than a config flag
+in Stage 13/14's app), the operational consequence (how to swap
+`[tool.flwr.app.components]` to actually run this ablation row, and that it's
+been reverted to the canonical app), the real `max_weight` bug found and fixed,
+the live validation numbers (round 3 `pooled_test_auroc=0.8126`, tracking Stage
+13's plain-FedAvg trajectory closely, as expected), and the "masks cancel
+exactly" test design (CLAUDE.md §11.3's own named requirement).
 
-Next is **Stage 15 — Secure Aggregation with Flower SecAgg+** (`REQ`, **`L`-sized**,
-**ablation row 4**, **ADR-3**) — masking the client's classifier-head update so even
-the (honest-but-curious) server never sees an individual hospital's unmasked update,
-only the aggregate. Per ADR-3, this must use Flower's built-in SecAgg+ workflow —
-**no custom cryptography**. What it needs: wiring Flower's `SecAggPlusWorkflow` (or
-current equivalent — verify against the pinned 1.35.0 API the same way Stage 13's
-Message-API surface was verified, not from memory or older docs, per ADR-5) into
-`server_app.py`'s aggregation step; SecAgg+ operates over a finite field, so the
-head-only `ArrayRecord` update needs quantization before masking (ADR-3 flags this
-explicitly as something to measure and report, not hide — it's the ablation table's
-row 4 vs. row 3 comparison). The single most important test for this stage, named
-directly in CLAUDE.md §11.3: **masks cancel exactly — the unmasked aggregate must
-equal plain FedAvg within tolerance.** That test is what turns "we implemented
-SecAgg" into a defensible claim for the paper.
+Next is **Stage 16 — TLS with client authentication** (`REQ`, **`M`-sized**,
+**ADR-4**) — mutual TLS or Flower's node-authentication with per-hospital
+key pairs, so an unregistered party can't impersonate a hospital and the
+server-only-TLS gap (server authenticates to client, but not vice versa) is
+closed. Certificate/key generation must be scripted and committed (the
+*generation script*, never the generated certs/keys themselves — CLAUDE.md is
+explicit that `certs/` stays gitignored). **The exact mechanism and flags must
+be verified against the pinned flwr==1.35.0 the same way Stage 15's SecAgg+
+surface was verified** — ADR-4 itself flags this area as having changed across
+Flower releases, and per Stage 15's finding, TLS + client auth may or may not
+compose cleanly with SecAgg+'s legacy-API app pair vs. Stage 13/14's
+Message-API app pair; this needs checking before assuming either shape,
+not assumed from either stage's precedent. This is a natural point to run in
+**deployment mode** (Docker Compose, real separate processes, real gRPC) for
+the first time, rather than simulation — worth flagging that Stage 17
+(Docker deployment) and Stage 16 may need to move together or in tight
+sequence, unlike the simulation-only stages so far.
 
-No new decision gate is currently known to block Stage 15 (unlike DG-7 for Stage 14).
-Given the project has now completed 7 major stages in this session (8 through 14,
-covering the entire FL+DP core — feature caching, the frozen backbone, both
-baselines, FedAvg, and differential privacy), **a fresh check-in with the owner before
-starting Stage 15 is still warranted** as a natural phase-scope checkpoint, following
-the same pattern used before Stages 13 and 14 — not because of an open gate, but
-because Stage 15 is itself `L`-sized and touches the server's aggregation path for
-the first time since Stage 13.
+No new decision gate is currently known to block Stage 16. Given the project has
+now completed 8 major stages in this session (8 through 15, covering the entire
+FL + DP + SecAgg core — feature caching, the frozen backbone, both baselines,
+FedAvg, differential privacy, and secure aggregation), **a fresh check-in with
+the owner before starting Stage 16 is still warranted**, both as a natural
+phase-scope checkpoint and because Stage 16 is the first stage to leave
+simulation-only territory.

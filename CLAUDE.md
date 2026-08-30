@@ -567,9 +567,9 @@ touch them.
 | Git repository | Initialized, remote configured, **no commits yet** |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), and Phase 3's Stages 13–14 complete — FedAvg verified working end-to-end (real 20-round run), and Differential Privacy (Opacus DP-SGD, sample-level, RDP accountant) verified via two real live runs at target-epsilon 4 and 1. Secure Aggregation and TLS/client auth (Stages 15–16) not yet implemented. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
+| Code | Phase 0, Phase 1, Phase 2 (Stages 6–12), and Phase 3's Stages 13–15 complete — FedAvg verified working end-to-end (real 20-round run), Differential Privacy (Opacus DP-SGD, sample-level, RDP accountant) verified via two real live runs at target-epsilon 4 and 1, and Secure Aggregation (Flower SecAgg+, ADR-3) verified via a real live run with updates actually masked. TLS/client auth (Stage 16) not yet implemented. See `docs/SESSION_STATE.md` for current detail; this table is a coarse summary. |
 | Docker configuration | None |
-| Tests | 111 passing |
+| Tests | 114 passing |
 
 ### Resolved decisions
 
@@ -617,6 +617,19 @@ touch them.
    target-epsilon=1, round-5 `pooled_test_auroc=0.8022` (larger, still moderate cost) —
    confirming the expected monotonic epsilon/accuracy tradeoff with real numbers. Full detail
    in `docs/SESSION_STATE.md` §7's Stage 14 note. Sweep values 2 and 8 not yet run.
+
+6. **Secure Aggregation implementation approach (resolved 2026-08-30, owner-approved).**
+   At the pinned `flwr==1.35.0`, Flower's SecAgg+ (`SecAggPlusWorkflow`) is only wired
+   through Flower's legacy `Strategy`/`ClientManager`/`workflow` API, not the new
+   Message-API `strategy.start()` loop Stages 13–14 use — verified against the installed
+   package source and cross-checked against Flower's own reference example
+   (`examples/flower-secure-aggregation`). Owner approved building Stage 15 on that legacy
+   API (the only ADR-3-compliant option — no custom crypto) as a **separate**
+   `client_app_secagg.py`/`server_app_secagg.py` app pair rather than a config flag in the
+   canonical app, since a `ClientApp` cannot mix the legacy `client_fn` and new-decorator
+   styles. `pyproject.toml`'s `[tool.flwr.app.components]` must be temporarily swapped to
+   this pair to run ablation row 4, then reverted — see `docs/SESSION_STATE.md` §7's Stage
+   15 note for the exact procedure and the real live-validation results.
 
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
