@@ -105,3 +105,22 @@ dp-enabled = false
 target-epsilon = 4.0
 target-delta = 0.00001
 max-grad-norm = 1.0
+
+# Stage 15 — Secure Aggregation (ADR-3, ablation row 4). Only consumed when
+# [tool.flwr.app.components] is temporarily pointed at
+# src.federated.server_app_secagg:app / client_app_secagg:app instead of the
+# canonical app above — SecAgg+ at flwr==1.35.0 only integrates via Flower's
+# legacy Strategy/workflow API, which is a structurally different ServerApp
+# construction, not a runtime flag (see server_app_secagg.py's docstring).
+# num_shares=3/reconstruction_threshold=2: all 3 hospitals share key pieces,
+# any 2 of 3 can reconstruct — tolerates 1 client dropout, the protocol's
+# natural minimum non-trivial setting for a fixed 3-client project.
+num-shares = 3
+reconstruction-threshold = 2
+# max-weight must exceed every hospital's train-set size (SecAggPlusWorkflow's
+# own default is 1000.0, far below this project's real per-hospital counts —
+# Hospital B/C's natural shards are ~13,342 train each — which triggers its
+# "potential overflow" warning in the weight-encoding math every round;
+# found via the Stage 15 live validation run, not by inspection). 20000 gives
+# headroom above the largest hospital with room to spare for future partitions.
+max-weight = 20000
