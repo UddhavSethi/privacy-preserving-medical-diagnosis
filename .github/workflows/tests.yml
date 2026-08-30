@@ -1,0 +1,72 @@
+# Stage 22 — optional CPU-only fast-tests CI workflow (docs/IMPLEMENTATION_PLAN.md
+# Stage 22, item 3: "optionally a GitHub Actions workflow running CPU-only fast
+# tests"). Runs the full `tests/` suite as-is — no test selection/markers needed:
+# every test that needs the real ~62GB dataset, a trained checkpoint, or GPU
+# hardware already guards itself with `pytest.mark.skipif` when that prerequisite
+# is absent (established discipline throughout this project, e.g.
+# tests/test_gradcam.py, tests/test_mc_dropout.py, tests/test_integration_smoke.py),
+# and none of those artifacts exist on a fresh checkout — so this naturally runs
+# the pure-unit-test majority and skips the rest, without a second test-selection
+# mechanism to keep in sync with the first.
+#
+# Installs CPU-only torch/torchvision explicitly rather than `uv sync` against the
+# committed lockfile, which targets CUDA (pytorch-cu126) for the host dev
+# environment's GPU — the same real, measured lesson Stage 17's Docker images
+# learned (excluding torch by name from `uv sync` does not prune its transitive
+# nvidia-*-cu12 dependencies from a frozen CUDA-oriented lockfile; a multi-GB
+# download for hardware this runner doesn't have and these tests don't need).
+name: tests
+
+# Quoted, not bare `on:` — bare `on` parses as the YAML 1.1 boolean `True` in
+# strict parsers (confirmed via this file's own validation, not assumed);
+# GitHub's own workflow parser tolerates the unquoted form, but quoting avoids
+# the ambiguity outright rather than relying on that tolerance.
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  fast-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (CPU-only torch, direct installs — not `uv sync`)
+        # Direct `uv pip install`, not `uv sync` against the committed uv.lock:
+        # excluding torch/torchvision by name via --no-install-package does NOT
+        # prune their transitive nvidia-*-cu12 dependencies from a --frozen sync
+        # against this CUDA-oriented lockfile (Stage 17's own finding, verified
+        # again here rather than assumed) — a multi-GB download this runner has
+        # no use for. flwr[simulation] (not plain flwr) since the test suite
+        # exercises the simulation runtime directly.
+        run: |
+          uv pip install --system \
+            torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --system \
+            "flwr[simulation]==1.35.0" \
+            opacus==1.6.0 \
+            opencv-python-headless==5.0.0.93 \
+            hydra-core==1.3.5 \
+            omegaconf==2.3.1 \
+            mlflow==3.15.2 \
+            numpy==2.4.6 \
+            pandas==2.3.3 \
+            scikit-learn==1.9.0 \
+            pydicom==3.0.2 \
+            pillow==12.3.0 \
+            tqdm==4.70.0 \
+            matplotlib==3.11.1 \
+            grad-cam==1.5.7 \
+            kaggle==2.2.4 \
+            requests==2.34.2 \
+            pytest==9.1.1
+
+      - name: Run test suite
+        run: python -m pytest tests/ -v

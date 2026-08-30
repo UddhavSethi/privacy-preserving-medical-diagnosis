@@ -174,7 +174,8 @@ re-asserted by a dedicated test against the live files).
 | 19 — Monte Carlo Dropout and deferral | **Done — DG-10 resolved (fixed coverage target, defer worst 10%), verified on the real pooled test set: retained-case accuracy exceeds overall accuracy.** No implementation bugs this time (all 9 new tests passed on first run) — a clean stage after Grad-CAM's real bug. `src/uncertainty/{mc_dropout,deferral}.py`, `conf/experiment/uncertainty.yaml`. 134/134 tests passing (9 new). | (pending commit this session) |
 | 20 — Overhead instrumentation | **Done — real per-round communication and compute cost, DP's and SecAgg's overhead attributed separately from real live-run comparisons.** `src/evaluation/overhead.py`, small additive instrumentation in `client_app.py`/`client_app_secagg.py`. 140/140 tests passing (6 new). See note below the table. | (pending commit this session) |
 | 21 — Full ablation campaign | **Done — 27/27 real live runs succeeded, every row of the ablation table has real numbers, 3 seeds each.** Epsilon sweep shows a clean monotonic privacy-utility tradeoff; Dirichlet sweep shows the expected heterogeneity-hurts-FedAvg effect. Real bugs found and fixed along the way — see note below the table. 144/144 tests passing (3 new). | (pending commit this session) |
-| 22–23 | Not started | — |
+| 22 — Test suite hardening | **Done — audit found the existing suite already covers every CLAUDE.md §11.3 requirement except one; filled that gap and added optional CI.** `tests/test_integration_smoke.py` (new), `.github/workflows/tests.yml` (new). 145/145 tests passing (1 new). See note below the table. | (pending commit this session) |
+| 23 | Not started | — |
 
 **Stage 8 was the project's single largest technical-risk stage, and it passed cleanly
 on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
@@ -1137,6 +1138,73 @@ data as it ran rather than against a mocked backend, which would only test
 the mock's behavior, not MLflow's actual filter-string dialect (finding #5
 above was only discoverable this way).
 
+**Stage 22 (`tests/test_integration_smoke.py`, `.github/workflows/tests.yml`)
+— test suite hardening (CLAUDE.md §11.3). A genuine audit, not a rewrite:
+this session's established discipline of writing real tests during each
+stage (not deferred to the end — exactly what the plan's own risk section
+for this stage warns against) meant the suite was already comprehensive
+before Stage 22 started.**
+
+**Audit against every item CLAUDE.md §11.3 names explicitly:**
+- Partitioning — zero patient overlap **and** determinism given a seed:
+  both already covered, for splitting (Stage 4), natural sharding (Stage 5),
+  Dirichlet partitioning (Stage 5/21), and subsampling (Stage 5) —
+  `tests/test_splitting.py`, `tests/test_partitioning.py`.
+- Preprocessing — BGR→RGB, CLAHE determinism: both already covered,
+  `tests/test_preprocessing.py` (Stage 6).
+- DP — clipping/noise math, accountant consuming budget across rounds:
+  both already covered, `tests/test_dp.py`, `tests/test_accounting.py`
+  (Stage 14).
+- Secure Aggregation — masks cancel exactly: already covered,
+  `tests/test_secagg.py` (Stage 15).
+- **Integration — a smoke test that runs the whole pipeline end to end:
+  genuinely missing.** Every live validation this session (Stages 13-21)
+  was a real, ad-hoc `flwr run` invocation, never persisted as an automated
+  regression test. Fixed with `tests/test_integration_smoke.py`.
+
+**One deliberate deviation from the requirement's literal wording, explained
+rather than silently substituted**: CLAUDE.md §11.3 names "a 2-client,
+single-round smoke test," but this project's real, approved architecture is
+fixed at exactly 3 hospitals everywhere else (`server_app.py`'s `HOSPITALS`
+constant, `client_app.py`'s `PARTITION_TO_HOSPITAL` mapping, the production
+FedAvg strategy's `min_available_nodes=len(HOSPITALS)=3`) — a literal
+2-client run would simply hang against the real strategy, since it requires
+all 3. The smoke test uses the real 3-hospital setup for one real round
+instead, which is the more faithful version of the requirement's own stated
+purpose (catch integration bugs no unit test can) than an artificial
+2-client variant that doesn't match anything the actual system ever runs.
+Real subprocess invocation (`flwr run . --run-config "num-server-rounds=1"
+--federation-config "num-supernodes=3" --stream`), not a mock — passes in
+~33s.
+
+**Optional CI workflow added** (`.github/workflows/tests.yml`, GitHub
+Actions, CPU-only): runs `tests/` as-is with no test-selection markers —
+every test needing the real dataset, a trained checkpoint, or GPU hardware
+already self-guards with `pytest.mark.skipif` (established discipline
+throughout the session), and none of those artifacts exist on a fresh
+checkout, so the workflow naturally runs the pure-unit-test majority and
+skips the rest without a second selection mechanism to keep in sync with
+the first. Installs CPU-only torch/torchvision via direct `uv pip install`
+rather than `uv sync` against the committed (CUDA-oriented) lockfile —
+re-applies Stage 17's own real finding (excluding torch by name from
+`uv sync` does not prune its transitive `nvidia-*-cu12` dependencies) rather
+than re-discovering it the hard way in CI. A smaller finding while writing
+the workflow file itself: bare `on:` in a YAML file parses as the boolean
+`True` under strict YAML 1.1 rules (confirmed via this file's own
+validation) — GitHub's own parser tolerates the unquoted form, but the
+workflow quotes it (`"on":`) to avoid relying on that tolerance.
+
+No `tests/conftest.py` added — audited for genuine fixture duplication
+across test files first (per this project's own "no abstraction beyond
+what's needed" convention) and found each file's fixtures already
+appropriately scoped; adding one to satisfy a checklist item with no real
+consolidation to do would be the kind of unneeded abstraction CLAUDE.md
+itself discourages.
+
+145/145 tests passing (1 new — the integration smoke test; the CI workflow
+adds no new test count locally, it just runs the existing suite in a fresh
+environment).
+
 **Also recorded (documentation only, not implemented):** two optional extensions were
 raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-5**
 (Isolation Forest OOD detection gate, scoped to chest-X-ray anomaly detection only, not
@@ -1226,29 +1294,19 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. Stage 21 is about to be committed on top of `d55697f`
-(Stage 20) — `scripts/run_ablation.py` (new), `scripts/build_partitions.py`
-(Dirichlet-ablation additions), `src/evaluation/tables.py` (new),
-`src/federated/server_app.py`/`server_app_secagg.py` (MLflow instrumentation),
-`src/training/trainer.py` (multi-source hospital fix),
-`conf/experiment/ablation.yaml` (new), `tests/test_tables.py` (new),
-`tests/test_trainer.py` (new multi-source test), `pyproject.toml`
-(mlflow-tracking-uri config), `data/partitions/hospitals_dirichlet_alpha{0.1,1.0}.json`
-(new — confirmed trackable, not gitignored: `.gitignore` allowlists
-`data/partitions/*.json` the same way it does for `hospitals_natural.json`),
-plus this file's update. `pyproject.toml`'s `[tool.flwr.app.components]` was
-temporarily swapped to the SecAgg app pair for Row 4's 3 runs and
-**confirmed reverted** (`git diff pyproject.toml` shows only the legitimate
-mlflow-config addition). No new dependencies. Check `git log --oneline -5`
-on resume — this file is not re-updated after every single commit within a
-session, only at natural pause points.
+**Branch:** `main`. Stage 22 is about to be committed on top of `a1951bf`
+(Stage 21) — `tests/test_integration_smoke.py` (new),
+`.github/workflows/tests.yml` (new), plus this file's update. No source
+code changes, no new dependencies. Check `git log --oneline -5` on resume —
+this file is not re-updated after every single commit within a session,
+only at natural pause points.
 
 ```
+a1951bf Stage 21: Full ablation campaign — 27/27 real live runs, complete results table
 d55697f Stage 20: Overhead instrumentation — DP and SecAgg overhead attributed separately
 f6256a2 Stage 19: Monte Carlo Dropout and deferral (DG-10 resolved) — Phase 4 complete
 9fcc8af Stage 18: Grad-CAM explainability
 3ece93a Stage 17: Docker Compose multi-client deployment
-e078cee Stage 16: TLS + client authentication (ADR-4)
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -1287,29 +1345,32 @@ params, row 6 scope) directly, then granted broad autonomy for the
 remaining work as they stepped away. **Do not assume this grant extends
 past Stage 23.**
 
-Next is **Stage 22 — test suite hardening** (`REQ`, **`M`-sized**) — per its
-own plan text, this is largely *consolidation*, not new implementation: most
-of CLAUDE.md §11.3's required tests already exist, written during their own
-stages (patient overlap — Stage 4; BGR→RGB, CLAHE determinism — Stage 6; DP
-clipping/noise/accounting — Stage 14; SecAgg mask cancellation — Stage 15;
-a federated smoke test — Stage 13). The job: confirm the full suite
-(currently 144 tests) genuinely runs green in one command from a clean
-state, check for any real gaps against §11.3's specific list, consider
-`tests/conftest.py` for shared fixtures, and optionally a CPU-only GitHub
-Actions workflow. The plan's own risk note is worth heeding: "tests written
-only at the end tend to codify existing bugs" — this session's tests were
-written stage-by-stage against real behavior already, which is the safer
-order; Stage 22 should audit and fill gaps, not retrofit assertions to
-match whatever the code currently does.
+**Stage 22 is complete — audit confirmed the suite already covered every
+CLAUDE.md §11.3 requirement except the integration smoke test, which was
+missing (every prior live validation was ad-hoc, never persisted as an
+automated test) and is now added.** `tests/test_integration_smoke.py` runs
+the real 3-hospital, 1-round federated pipeline end to end (a deliberate,
+explained deviation from the literal "2-client" wording — this project's
+real architecture is fixed at 3, and a 2-client run would hang against the
+production strategy's `min_available_nodes=3`). An optional CPU-only GitHub
+Actions workflow (`.github/workflows/tests.yml`) was also added, re-applying
+Stage 17's own CPU-torch-install lesson rather than re-discovering it in CI.
+145/145 tests passing. No `tests/conftest.py` — audited for genuine fixture
+duplication first and found none needing consolidation.
 
-After that, **Stage 23 — documentation and reproducibility package**
-(`REQ`, **`M`-sized**) — a full README, threat model write-up (CLAUDE.md
-§6), limitations (§15), results documentation, an architecture diagram, and
-a *proposed* CLAUDE.md status update. **Important governance note for
-whoever picks this up**: Stage 23's own plan text says "Architecture
+Next is **Stage 23 — documentation and reproducibility package** (`REQ`,
+**`M`-sized**) — a full README, threat model write-up (CLAUDE.md §6),
+limitations (§15), results documentation (this session's real ablation
+table from Stage 21), an architecture diagram, and a *proposed* CLAUDE.md
+status update. **Important governance note, binding regardless of the
+Stage 21-23 autonomy grant**: Stage 23's own plan text says "Architecture
 change? Yes... Proposed for approval, not applied unilaterally" — CLAUDE.md
 itself requires propose→explain→show→ask→approve for any edit to itself,
-and the broad Stage 21-23 autonomy grant does not override that specific,
-explicit governance rule. Implement everything else in Stage 23 directly,
-but the CLAUDE.md diff itself must be shown to the owner and approved
-before being applied, not committed as part of autonomous work.
+and the broad autonomy grant does not override that specific, explicit
+governance rule (CLAUDE.md's own opening lines: "Do NOT modify this file
+automatically"). Implement everything else in Stage 23 directly (README,
+docs/threat_model.md, docs/results.md, docs/reproducibility.md,
+docs/figures/), but the CLAUDE.md diff itself must be shown to the owner
+and approved before being applied, not committed as part of autonomous
+work — this is the one place in Stages 21-23 where the grant does not mean
+"just do it."
