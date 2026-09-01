@@ -21,13 +21,14 @@ from __future__ import annotations
 
 import os
 import shutil
-import signal
 import socket
 import subprocess
 import time
 from pathlib import Path
 
 import pytest
+
+from tests.conftest import kill_process_tree
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTROL_API_PORT = 29093
@@ -37,28 +38,6 @@ pytestmark = pytest.mark.skipif(
     shutil.which("openssl") is None or shutil.which("ssh-keygen") is None,
     reason="requires the openssl and ssh-keygen command-line tools",
 )
-
-
-def _kill_process_tree(proc: subprocess.Popen, timeout: float = 5.0) -> str:
-    """Kills a process AND its descendants (Flower's CLI processes spawn a
-    "SuperExec" sidecar that outlives a plain `terminate()`/`kill()` on the
-    parent alone and keeps the stdout pipe open, which otherwise hangs
-    `communicate()` forever — found via this test's own first run, not by
-    inspection). Requires the process to have been started with
-    `start_new_session=True`. Returns whatever combined stdout was captured."""
-    if proc.poll() is None:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    try:
-        return proc.communicate(timeout=timeout)[0] or ""
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        return proc.communicate(timeout=timeout)[0] or ""
 
 
 def _wait_for_port(port: int, timeout: float = 15.0) -> None:
@@ -122,7 +101,7 @@ def deployment_env(tmp_path):
         )
         yield cert_dir, env
     finally:
-        _kill_process_tree(superlink)
+        kill_process_tree(superlink)
 
 
 def test_supernode_auth_requires_tls():
@@ -181,7 +160,7 @@ def test_unregistered_supernode_is_rejected(deployment_env):
         while time.monotonic() < deadline and supernode.poll() is None:
             time.sleep(0.3)
     finally:
-        combined = _kill_process_tree(supernode)
+        combined = kill_process_tree(supernode)
 
     assert "FAILED_PRECONDITION" in combined or "Failed to activate SuperNode" in combined, (
         f"expected an unregistered SuperNode to be rejected by the SuperLink; "
@@ -233,7 +212,7 @@ def test_registered_supernode_is_accepted(deployment_env):
             time.sleep(0.3)
         accepted = supernode.poll() is None
     finally:
-        output = _kill_process_tree(supernode)
+        output = kill_process_tree(supernode)
 
     assert accepted, (
         f"expected a registered SuperNode to stay connected, but it exited early:\n{output}"

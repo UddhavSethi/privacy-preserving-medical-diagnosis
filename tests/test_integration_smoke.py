@@ -32,6 +32,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import kill_local_simulation_daemon, kill_process_tree
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PARTITION_PATH = REPO_ROOT / "data" / "partitions" / "hospitals_natural.json"
 FEATURE_CACHE_DIR = REPO_ROOT / "data" / "feature_cache"
@@ -43,8 +45,26 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_single_round_federated_smoke_end_to_end(tmp_path):
+    """Two real, independent robustness gaps found and fixed 2026-09-01 (see
+    tests/conftest.py's own module docstring for which one actually caused
+    this session's flakiness — it wasn't the one you'd guess):
+
+    1. `Popen` + `kill_process_tree`, not `subprocess.run(..., timeout=...)` —
+       the latter only kills the direct child on timeout, orphaning whatever
+       daemon tree `flwr run` started.
+    2. `kill_local_simulation_daemon()` before AND after — `flwr run`'s local
+       SuperLink deliberately detaches into its own session (by design, for
+       reuse across runs), so even (1)'s process-group kill can't reach it if
+       something does hang. Calling this before the run guards against a
+       stale daemon from an earlier, differently-configured invocation
+       (exactly what actually broke this test this session — see
+       pyproject.toml's `[tool.flwr.app.components]` history); calling it
+       after prevents this run's own daemon from doing the same to whatever
+       runs next.
+    """
+    kill_local_simulation_daemon()
     isolated_mlflow_uri = f"sqlite:///{tmp_path / 'smoke_test_mlruns.db'}"
-    result = subprocess.run(
+    proc = subprocess.Popen(
         [
             "uv", "run", "flwr", "run", ".",
             "--run-config",
@@ -53,10 +73,20 @@ def test_single_round_federated_smoke_end_to_end(tmp_path):
             "--stream",
         ],
         cwd=REPO_ROOT,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        timeout=180,
+        start_new_session=True,
     )
-    assert result.returncode == 0, f"flwr run failed:\n{result.stdout}\n{result.stderr}"
-    assert "pooled_test_auroc" in result.stdout
-    assert "Final global classifier saved" in result.stdout
+    try:
+        try:
+            stdout = proc.communicate(timeout=180)[0]
+        except subprocess.TimeoutExpired:
+            stdout = kill_process_tree(proc)
+            pytest.fail(f"flwr run did not complete within 180s (process tree killed):\n{stdout}")
+
+        assert proc.returncode == 0, f"flwr run failed:\n{stdout}"
+        assert "pooled_test_auroc" in stdout
+        assert "Final global classifier saved" in stdout
+    finally:
+        kill_local_simulation_daemon()
