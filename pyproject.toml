@@ -73,8 +73,8 @@ flwr-version-target = "1.35.0"
 fab-include = ["src/**/*.py", "pyproject.toml"]
 
 [tool.flwr.app.components]
-serverapp = "src.federated.server_app_finetune:app"
-clientapp = "src.federated.client_app_finetune:app"
+serverapp = "src.federated.server_app:app"
+clientapp = "src.federated.client_app:app"
 
 [tool.flwr.app.config]
 # Stage 13 — FedAvg, no privacy layers. Mirrored (documentation-only) in
