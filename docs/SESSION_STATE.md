@@ -1661,3 +1661,97 @@ check-in is needed before any OPT-6 work begins, not an assumption of
 continued autonomy. All five completed extensions are committed and
 pushed to `origin/main` (commits `6f679b4`, `ce06be6`, `dcf0943`,
 `9514ba3`, and OPT-5's own commit immediately following this note).
+
+## 13. OPT-6 — Streamlit demo interface
+
+**Owner check-in happened as anticipated** — after Phase 6's OPT-1-5
+summary, the owner asked for OPT-6 with a detailed brief (landing/dashboard,
+X-ray analysis flow, Grad-CAM, trust/safety panel, federated-architecture
+visualization, research-results tab, checkpoint selector, dark
+professional design, responsiveness, and explicit engineering constraints:
+reuse existing inference code, no duplicated logic, keep frontend
+separated from research code, handle missing artifacts gracefully). The
+owner also explicitly said: stop and ask before installing Streamlit if
+not already present (governance-consistent with CLAUDE.md section 17.3),
+and "first show the frontend to me locally then we deploy it" — i.e.
+local-only for this pass, no deployment.
+
+**Streamlit was not installed.** Proposed `streamlit==1.62.0` (the newest
+version resolving cleanly against every existing pin via a real `uv pip
+install --dry-run`, pulling in altair/pydeck/python-multipart/toml/watchdog
+and a websockets 17.1->16.1.1 downgrade — flagged explicitly since nothing
+else in the project pins websockets directly). Owner's next message ("first
+show the frontend to me locally then we deploy it") was treated as approval
+of that specific proposal — the sequencing point was what the owner was
+actually responding to, not a dispute of the version. Added to
+`pyproject.toml`, `uv sync` resolved cleanly exactly as the dry-run
+predicted.
+
+**Implementation — real reuse, not a rewrite:**
+- `app/inference.py` — zero Streamlit import, zero new inference logic.
+  Every step calls directly into already-tested modules: `src/data/
+  preprocessing.py` (CLAHE), `src/data/transforms.py` (eval transform),
+  `src/models/densenet_head.py` (checkpoint loading, matching
+  `evaluate_classifier`'s exact pattern), `src/uncertainty/mc_dropout.py`
+  (prediction+confidence+entropy — Stage 19's own design already IS the
+  clinical prediction mechanism, so there is no second inference path),
+  `src/explain/gradcam.py` (`generate_overlay`, unmodified), `src/
+  uncertainty/ood_detector.py` (`build_and_calibrate`, one detector per
+  hospital, unmodified). One genuinely new but narrow piece of reasoning:
+  DG-10's deferral policy (`compute_deferral`) is defined relative to a
+  BATCH's uncertainty distribution, which has no meaning for a single
+  uploaded image — resolved by calibrating the entropy threshold once
+  against the real pooled val set at app startup (still calling
+  `compute_deferral` itself, just on a reference batch) and freezing it as
+  an absolute operating point for single-image inference. This is the
+  standard way to deploy a batch-relative policy for real one-at-a-time
+  inference, not an invented new policy.
+- `app/results_loader.py` — reads `outputs/results/*.json` (OPT-1-5's own
+  artifacts) and calls `src.evaluation.tables.build_ablation_table()`
+  directly. No research number is hardcoded anywhere in the frontend;
+  every loader returns `None` (never raises) on a missing artifact, with
+  the UI showing "not yet generated, run `scripts/run_X.py`" instead of
+  crashing.
+- `app/theme.py` + `app/components.py` — dark professional CSS (Inter/
+  JetBrains Mono via Google Fonts, teal accent, card/badge/metric-tile/
+  decision-banner components) — pure presentation, no logic.
+- `app/streamlit_app.py` — 4 tabs (Overview, Analyze X-ray, Federated
+  Architecture, Research Results, the last with 5 sub-tabs for OPT-1-5).
+  Sidebar exposes exactly the 7 real trained configurations from Stage
+  21's campaign (seed 42 each, matching `generate_explanations.py`'s own
+  precedent of one canonical checkpoint per config) — centralized is
+  explicitly labeled "not privacy-preserving — comparison only," nothing
+  unreal is exposed.
+- `conf/app.yaml` — the one `conf/*.yaml` in this project the code it
+  documents actually loads at runtime (Streamlit doesn't run under
+  `hydra.main`).
+- `tests/test_app_inference.py` — 6 tests: pure decode/preprocess/label
+  logic (no artifacts needed) plus 2 real end-to-end tests against an
+  actual checkpoint and cached image (skipif missing).
+- `docs/frontend.md` — how to run it, required artifacts per feature, what
+  every displayed metric means (including the deferral-threshold reasoning
+  above), limitations, and an explicit "deployment not done in this pass"
+  section.
+
+**Verification — real, not assumed.** `tests/test_app_inference.py`: 6/6
+passing. Full suite: 199/199 (193+6). Then, since a rendered Streamlit UI
+can't be screenshotted from this environment, verification used
+Streamlit's own `AppTest` framework (`streamlit.testing.v1.AppTest`) —
+runs the actual script headlessly and surfaces real exceptions: (1) plain
+load, 0 exceptions across all 9 tabs/sub-tabs; (2) full upload -> MC
+Dropout -> Grad-CAM -> per-hospital OOD -> decision-banner render, using a
+REAL cached Normal-labeled test image, 0 exceptions, decision text
+confirmed present in the rendered output; (3) same flow after switching
+the sidebar selector to a DP checkpoint (epsilon=1) with a REAL
+Pneumonia-positive image, 0 exceptions. One real bug caught and fixed
+along the way: `use_container_width=True` is a deprecated Streamlit 1.62
+parameter (warns on every call) — replaced with `width="stretch"`
+throughout. The app was also actually launched (`streamlit run`) and left
+running locally on port 8501 for the owner's own visual review, per their
+explicit "show me the frontend locally" request — not deployed anywhere.
+
+**Not done, deliberately**: deployment (owner's own words: "then we
+deploy it" — a distinct, later step). CLAUDE.md itself has not been
+touched. Not yet committed/pushed — held for the owner's local review
+first, matching the explicit instruction to show it locally before any
+further step.

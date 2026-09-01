@@ -1,0 +1,98 @@
+# OPT-6 — Streamlit demo interface config (CLAUDE.md section 16.1a). Not loaded
+# via Hydra (Streamlit doesn't run under `hydra.main`) — loaded directly with
+# OmegaConf at app startup (`app/streamlit_app.py`), so unlike this project's
+# other documentation-mirror conf/ files, this one IS the actual source of these
+# constants for the app, not a description of values hardcoded elsewhere.
+#
+# Every numeric policy value here already has a canonical source that this app
+# reuses rather than re-decides: mc_dropout/deferral mirror Stage 19's DG-10
+# (conf/experiment/uncertainty.yaml); ood mirrors OPT-5's own placeholder
+# (conf/experiment/ood.yaml, itself explicitly NOT an owner-approved clinical
+# policy the way DG-10 is).
+
+paths:
+  checkpoint_dir: outputs/checkpoints
+  partition_path: data/partitions/hospitals_natural.json
+  feature_cache_dir: data/feature_cache
+  results_dir: outputs/results
+  figures_dir: docs/figures
+
+preprocessing:
+  image_size: 224
+  clahe_clip_limit: 2.0
+  clahe_tile_grid_size: [8, 8]
+
+mc_dropout:
+  num_passes: 20 # T — matches Stage 19 / conf/experiment/uncertainty.yaml
+
+deferral:
+  target_defer_fraction: 0.10 # matches DG-10 (owner-approved 2026-08-30)
+
+ood_detector:
+  target_flag_fraction: 0.05 # matches OPT-5's placeholder (conf/experiment/ood.yaml)
+  detector_seed: 42
+
+# Real trained configurations only (CLAUDE.md's own governance: never expose an
+# option the backend doesn't actually support) — every entry below has a real
+# checkpoint on disk from Stage 21's ablation campaign, seed 42 (matching
+# scripts/generate_explanations.py's existing precedent of one canonical
+# checkpoint per configuration for demonstration purposes).
+configurations:
+  - key: fedavg_no_dp
+    label: "FedAvg (no privacy protection)"
+    checkpoint: outputs/checkpoints/ablation/fedavg_natural_seed42.pt
+    description: "The federated global model — no Differential Privacy, no Secure Aggregation."
+    privacy_preserving: false
+  - key: fedavg_dp_eps1
+    label: "FedAvg + DP (epsilon=1, strongest privacy)"
+    checkpoint: outputs/checkpoints/ablation/dp_eps1.0_seed42.pt
+    description: "Differential Privacy at the tightest budget in the sweep."
+    privacy_preserving: true
+  - key: fedavg_dp_eps2
+    label: "FedAvg + DP (epsilon=2)"
+    checkpoint: outputs/checkpoints/ablation/dp_eps2.0_seed42.pt
+    description: "Differential Privacy, epsilon=2."
+    privacy_preserving: true
+  - key: fedavg_dp_eps4
+    label: "FedAvg + DP (epsilon=4, default)"
+    checkpoint: outputs/checkpoints/ablation/dp_eps4.0_seed42.pt
+    description: "Differential Privacy at this project's pyproject.toml default epsilon."
+    privacy_preserving: true
+  - key: fedavg_dp_eps8
+    label: "FedAvg + DP (epsilon=8, weakest privacy in sweep)"
+    checkpoint: outputs/checkpoints/ablation/dp_eps8.0_seed42.pt
+    description: "Differential Privacy at the loosest budget in the sweep."
+    privacy_preserving: true
+  - key: fedavg_secagg
+    label: "FedAvg + Secure Aggregation"
+    checkpoint: outputs/checkpoints/ablation/secagg_seed42.pt
+    description: "No Differential Privacy, but the server never sees an individual hospital's update."
+    privacy_preserving: false
+  - key: centralized
+    label: "Centralized (privacy-free ceiling — comparison only)"
+    checkpoint: outputs/checkpoints/centralized_baseline/natural_seed42.pt
+    description: "NOT privacy-preserving. Pooled training, shown only as the upper-bound comparison point."
+    privacy_preserving: false
+  - key: fedavg_finetune_pilot
+    label: "FedAvg + fine-tuned last block (experimental — ADR-1 GroupNorm fallback, round 9)"
+    checkpoint: outputs/checkpoints/finetuned/fedavg_natural_seed42.pt
+    description: "Experimental pilot checkpoint (docs/adr1_groupnorm_fallback.md §6): denseblock4+norm5 unfrozen and fine-tuned under real FedAvg, 10 rounds, round 9 selected by pooled val AUROC. Higher AUROC than the default FedAvg checkpoint, but single-seed and not yet run under DP/SecAgg. Deferral and OOD checks are unavailable for this checkpoint (Stage 9's calibration cache assumes a frozen backbone, invalid here) — do not treat their absence as those checks passing."
+    privacy_preserving: false
+    fine_tune_last_block: true
+    # Decision policy (docs/adr1_groupnorm_fallback.md §10, owner-directed
+    # 2026-09-01) -- derived from round 9's own real validation set, never the
+    # test set. decision_threshold: Youden's-J / best-F1 operating point
+    # (sens=0.825, spec=0.739 on val), replacing the previous implicit 0.5
+    # (sens=0.747, spec=0.788) -- strictly better on sensitivity/F1, a real
+    # specificity cost, a clinically deliberate tradeoff, not a default.
+    # abstention_half_width: band around that threshold where the calibrated
+    # P(pneumonia) is treated as "Uncertain" rather than forced to a class --
+    # 0.05 was chosen as the closest tested width to this project's own
+    # existing 10% deferral-target convention (DG-10), landing at 9.6% val
+    # abstention. temperature: fit via src.uncertainty.probability_calibration
+    # on val (T=0.9349) -- a mild sharpening (T<1), not softening; kept because
+    # it measurably improved ECE (0.0155->0.0129) on val, not because it
+    # addresses overconfidence (it doesn't -- see the module docstring).
+    decision_threshold: 0.45
+    abstention_half_width: 0.05
+    temperature: 0.9349

@@ -15,13 +15,14 @@ explanations and calibrated-confidence deferral to a clinician.
 
 ## Status
 
-**Stages 0–23 complete**, plus **Phase 6 optional extensions OPT-1 through OPT-5**.
+**Stages 0–23 complete**, plus **Phase 6 optional extensions OPT-1 through OPT-6**.
 Federated pipeline (FedAvg + Differential Privacy + Secure Aggregation + TLS/client
 auth), Grad-CAM explainability, Monte Carlo Dropout deferral, a Docker Compose
-multi-client deployment, a real full ablation campaign, and a set of deeper research
+multi-client deployment, a real full ablation campaign, a set of deeper research
 extensions (calibration, an empirical privacy attack, quantitative Grad-CAM
-evaluation, conformal prediction, an OOD detection gate) are all implemented, tested,
-and validated against real live runs — not mocked. 193 tests passing.
+evaluation, conformal prediction, an OOD detection gate), and a Streamlit demo
+interface are all implemented, tested, and validated against real live runs — not
+mocked. 199 tests passing.
 
 | Phase | Stages | Status |
 |---|---|---|
@@ -31,7 +32,7 @@ and validated against real live runs — not mocked. 193 tests passing.
 | 3 — Federated core | 13–17 | Done |
 | 4 — Clinical trust | 18, 19 | Done |
 | 5 — Measurement & delivery | 20–23 | Done |
-| 6 — Optional research extensions | OPT-1–5 done, OPT-6 (Streamlit demo) pending discussion | Done / pending |
+| 6 — Optional research extensions | OPT-1–6 all done | Done (running locally; not yet deployed) |
 
 See `docs/IMPLEMENTATION_PLAN.md` for the full staged plan and `docs/SESSION_STATE.md` for
 the detailed, per-stage running log.
@@ -64,6 +65,7 @@ dataset, and why.
 | `docs/gradcam_localization.md` | OPT-3: quantitative Grad-CAM evaluation against RSNA bounding boxes |
 | `docs/conformal.md` | OPT-4: conformal prediction coverage/set-size analysis |
 | `docs/ood_detection.md` | OPT-5: per-hospital Isolation Forest out-of-distribution gate |
+| `docs/frontend.md` | OPT-6: how to run the Streamlit demo, what each metric means, limitations |
 | `docs/reproducibility.md` | How every reported number traces to a config/seed/MLflow run |
 | `Review_1_Privacy_Preserving_FL_Diagnosis.pptx` | Original project proposal (do not modify) |
 
@@ -100,20 +102,33 @@ rationale.
 ## Repository layout
 
 ```
-conf/        Hydra configs (model, data, federated, privacy, experiment)
+conf/        Hydra configs (model, data, federated, privacy, experiment) + app.yaml
 src/         data, models, privacy, federated, explain, uncertainty, evaluation, training, utils
+app/         Streamlit demo interface (OPT-6) — presentation only, not imported by src/
 scripts/     dataset prep, cert generation, experiment/ablation runners, figure generation
-tests/       pytest suite, 145 tests (see CLAUDE.md 11.3)
+tests/       pytest suite, 199 tests (see CLAUDE.md 11.3)
 docker/      Dockerfiles + compose for the multi-client deployment demonstration
 docs/        plan, session log, threat model, results, reproducibility, figures
 data/        raw/processed data (gitignored); partitions + manifests are committed
 ```
 
+## Demo interface
+
+```bash
+uv run streamlit run app/streamlit_app.py
+```
+
+A Streamlit demo over the trained checkpoints — upload a chest X-ray, see the
+prediction with MC Dropout confidence, a Grad-CAM explanation, the OOD safety
+check, and a deferral decision, plus a Research Results tab surfacing OPT-1–5's
+real findings. Full details: [`docs/frontend.md`](docs/frontend.md). Presentation
+layer only — does not touch training, evaluation, or the federated pipeline.
+
 ## Getting started
 
 ```bash
 scripts/setup_env.sh        # or: uv sync --all-groups
-uv run pytest tests/        # 145 tests; dataset/GPU-dependent tests skip gracefully if absent
+uv run pytest tests/        # 199 tests; dataset/GPU-dependent tests skip gracefully if absent
 ```
 
 Requires [uv](https://docs.astral.sh/uv/) and a CUDA-capable GPU for the pinned `torch==2.13.0+cu126`
