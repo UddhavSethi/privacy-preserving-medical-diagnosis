@@ -28,6 +28,11 @@ dependencies = [
     "grad-cam==1.5.7",
     "kaggle==2.2.4",
     "requests==2.34.2",
+    "streamlit==1.62.0",  # OPT-6 — approved 2026-08-30. Presentation-only demo
+    # layer (app/); never imported by src/ or tests other than the app's own
+    # inference-wrapper smoke test. Pulls in altair/pydeck/python-multipart/
+    # toml/watchdog and a websockets 17.1->16.1.1 downgrade (nothing else in
+    # this project pins websockets directly).
 ]
 
 [dependency-groups]
@@ -68,8 +73,8 @@ flwr-version-target = "1.35.0"
 fab-include = ["src/**/*.py", "pyproject.toml"]
 
 [tool.flwr.app.components]
-serverapp = "src.federated.server_app:app"
-clientapp = "src.federated.client_app:app"
+serverapp = "src.federated.server_app_finetune:app"
+clientapp = "src.federated.client_app_finetune:app"
 
 [tool.flwr.app.config]
 # Stage 13 — FedAvg, no privacy layers. Mirrored (documentation-only) in
@@ -85,6 +90,14 @@ clientapp = "src.federated.client_app:app"
 # its own path handling, not this one.
 partition-path = "/mnt/storage/pneumonia-detection/data/partitions/hospitals_natural.json"
 feature-cache-dir = "/mnt/storage/pneumonia-detection/data/feature_cache"
+# clahe-cache-dir: added 2026-08-31 for the ADR-1 GroupNorm fallback pilot's
+# federated app pair (client_app_finetune.py/server_app_finetune.py) -- those
+# train on raw CLAHE-cached images (a partially-unfrozen backbone invalidates
+# Stage 9's pooled-feature cache), unlike the canonical app above which never
+# reads this key. Declared here (not only passed via --run-config) because
+# Flower rejects a --run-config override for any key not already declared in
+# this file (see scripts/run_ablation.py's own note on this).
+clahe-cache-dir = "/mnt/storage/pneumonia-detection/data/clahe_cache"
 output-checkpoint = "/mnt/storage/pneumonia-detection/outputs/checkpoints/federated/fedavg_final.pt"
 num-server-rounds = 20
 local-epochs = 1

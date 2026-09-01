@@ -242,6 +242,28 @@ GroupNorm is the standard choice for FL under non-IID data and is DP-compatible.
 pretrained BatchNorm statistics are discarded, more training is required, and VRAM pressure
 increases substantially. **Requires approval before adopting.**
 
+**Adopted at the code level, pilot-validated (owner-approved 2026-08-30, implemented and
+piloted 2026-08-31 — see `docs/adr1_groupnorm_fallback.md` for full detail).** Triggered by
+a real debugging finding, not proactive tuning: a genuine "the model looks at the wrong
+part of the X-ray" complaint traced to this exact tradeoff — with the backbone fully
+frozen, the classifier only ever sees a globally-average-pooled 1024-number summary
+(`DenseNet121Head.pooled_features`), so Grad-CAM's heatmap is a reconstruction of
+correlated channels, not something the classifier ever spatially used; measured, this
+degrades from an already-weak 18.6% pointing-game accuracy to 0.0% specifically on images
+the frozen model gets wrong. `DenseNet121Head(fine_tune_last_block=True)`
+(`src/models/densenet_head.py`) implements exactly the approved fallback — unfreezes
+`denseblock4` + `norm5`, swaps their BatchNorm for GroupNorm via `ModuleValidator.fix()`
+(verified zero DP-validation issues) — **default remains `False`; every existing checkpoint
+is unaffected and loads identically.** A bounded pilot (centralized config, seed 42, 8
+epochs, `scripts/train_centralized_finetune.py`) confirmed real gains on held-out data:
+pooled test AUROC 0.9051 → 0.9256, and — the more decisive result — Grad-CAM pointing-game
+accuracy on the same real RSNA-boxed images roughly doubled when correct (23.1% → 37.5%)
+and, on cases still misclassified, recovered from 13.6% to 35.2% when asked to explain the
+true class. **Not yet a replacement for the approved architecture**: one seed, one config,
+not converged, and the Stage 21 ablation table / app default both remain on the original
+frozen-backbone architecture pending a scope decision on scaling this up (§14 pending
+decisions).
+
 ### ADR-2 — Differential Privacy is sample-level DP-SGD with a formal accountant
 
 Objective 2 is a **patient-level** claim ("no patient's data can be reverse-engineered"), so the
@@ -717,6 +739,14 @@ OPT-6) not started — optional, requires separate approval per §16.1.**
     MLflow filter-string dialect gotchas) in `docs/SESSION_STATE.md` §7's
     Stage 21 note.
 
+11. **ADR-1 GroupNorm fallback — piloted and code-adopted (owner-approved
+    2026-08-30, implemented and evaluated 2026-08-31).** See ADR-1 above and
+    `docs/adr1_groupnorm_fallback.md` for full detail: `fine_tune_last_block`
+    added to `DenseNet121Head` (default off, backward compatible), a bounded
+    single-seed pilot confirmed real accuracy and Grad-CAM localization gains
+    on held-out data. Scaling this into a paper-credible, multi-seed result is
+    an open scope decision, not yet started — see pending decisions below.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
 1. **Which regime (natural vs. balanced) is the paper's primary headline vs.
@@ -730,6 +760,16 @@ OPT-6) not started — optional, requires separate approval per §16.1.**
    scoped (item 10 below). Requires reconciling Stage 15's separate
    legacy-API SecAgg app pair with Stage 13/14/16's canonical Message-API app.
    Not yet raised for a decision on timing.
+3. **Whether/how far to scale the ADR-1 GroupNorm fallback pilot (resolved
+   decision 11 above).** The pilot is single-seed, single-config (centralized),
+   8 epochs without convergence — real signal, not yet a credible result by
+   §11.2's own 3-seed standard. Three options on the table, undecided: (a)
+   make the fine-tuned checkpoint the app's default now while leaving the
+   paper's ablation table on the frozen-backbone architecture; (b) re-run a
+   scoped subset of the ablation ladder (e.g. rows 1–3, 3 seeds) under
+   `fine_tune_last_block=True` for a paper-credible comparison without redoing
+   all 27 runs; (c) leave it as documented, verified future work. See
+   `docs/adr1_groupnorm_fallback.md` §6.
 
 ---
 
@@ -740,6 +780,9 @@ To be stated honestly in the paper. Concealing these weakens credibility more th
 1. **Simulated hospitals, not a real deployment.** Clients are simulated processes/containers on
    one machine. No real cross-institutional network, governance or data-use agreements.
 2. **Frozen backbone caps accuracy** relative to full fine-tuning (ADR-1). Accepted trade-off.
+   A partial mitigation (ADR-1's own GroupNorm fallback) is now piloted and code-adopted —
+   see ADR-1 and `docs/adr1_groupnorm_fallback.md` — but not yet scaled into the paper's
+   results or the deployed app; this limitation still applies to both as they stand today.
 3. **Effectively local DP**, which has worse utility than central DP at equal epsilon.
    Distributed DP is discussed but not implemented (ADR-2).
 4. **Malicious clients are out of scope.** No Byzantine or poisoning defense in this phase.
