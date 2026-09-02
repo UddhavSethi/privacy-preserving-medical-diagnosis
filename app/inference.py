@@ -36,6 +36,9 @@ from src.uncertainty.deferral import compute_deferral
 from src.uncertainty.mc_dropout import MCDropoutResult, compute_mc_dropout_uncertainty
 from src.uncertainty.ood_detector import build_and_calibrate, compute_anomaly_scores, flag_ood
 from src.uncertainty.probability_calibration import apply_temperature
+from src.uncertainty.xray_gate import XrayGateResult, load_gate_weights, predict_is_xray
+
+XRAY_GATE_WEIGHTS_PATH = Path(__file__).resolve().parents[1] / "src" / "uncertainty" / "xray_gate_weights.json"
 
 CLASS_NAMES = {NORMAL_CLASS_INDEX: "Normal", PNEUMONIA_CLASS_INDEX: "Pneumonia"}
 UNCERTAIN_LABEL = "Uncertain"
@@ -81,6 +84,30 @@ def load_classifier(checkpoint_path: Path, fine_tune_last_block: bool = False) -
     else:
         model.classifier.load_state_dict(state_dict)
     return model
+
+
+def load_xray_gate():
+    """Loads the chest-X-ray input gate (src/uncertainty/xray_gate.py) from its
+    committed weights file. No checkpoint/training data needed at load time."""
+    return load_gate_weights(XRAY_GATE_WEIGHTS_PATH)
+
+
+def check_is_xray(bgr_image: np.ndarray, gate, image_size: int = 224) -> XrayGateResult:
+    """Runs the gate against a FRESH, always-frozen backbone — deliberately
+    NOT whichever checkpoint the user has selected for diagnosis. The gate was
+    trained on Stage 9's cached pooled features, which are a frozen-backbone
+    artifact (see docs/adr1_groupnorm_fallback.md's own repeated note on this);
+    round 9's checkpoint partially unfreezes the backbone, so using ITS
+    pooled_features here would feed the gate a different feature distribution
+    than it was trained on — the exact mismatch already found and disabled for
+    deferral/OOD. A plain, un-checkpointed DenseNet121Head's backbone is always
+    the same frozen ImageNet weights regardless of which classifier head is
+    loaded, so no checkpoint is needed here at all."""
+    frozen_model = DenseNet121Head()
+    _, tensor = preprocess_image(bgr_image, image_size=image_size)
+    with torch.no_grad():
+        pooled_features = frozen_model.pooled_features(tensor).numpy()[0]
+    return predict_is_xray(gate, pooled_features)
 
 
 @dataclass

@@ -14,7 +14,9 @@ rate — section 12), a zero-cost filter-and-retrain diagnostic (section 13),
 and a real OOD-display bug fixed — a non-X-ray upload no longer gets a
 confident diagnosis (section 14); that fix was itself too aggressive and
 blocked a real X-ray, now reverted, plus a real MC-Dropout non-determinism
-bug fixed (section 15), 2026-09-02.** This document is the running record of a
+bug fixed (section 15); and a real, validated chest-X-ray input gate — real
+X-rays allowed in any form, other images actually rejected — built after two
+tried-and-failed approaches (section 16), 2026-09-02.** This document is the running record of a
 debugging session that led to implementing ADR-1's own documented approved
 fallback. It is written to be turned into a PDF at the end of the session — every
 claim below is either a direct code change, a measured number from this machine, or
@@ -854,7 +856,62 @@ addressing the original buried-warning problem without the new regression. Secti
 **Verified:** `sample2.jpg` now returns `Pneumonia, 70.2%` (still correctly flagged OOD, banner
 shown first) instead of being blocked. Full suite re-run: 205/205 passing.
 
-## 16. Code changes (summary — full detail in section 4)
+## 16. A real chest-X-ray input gate (2026-09-02)
+
+Owner asked directly: can the app only allow chest X-rays through — in any form/source — and
+reject other images outright, rather than the softer "analyze anyway, with a caution note"
+behavior sections 14-15 settled on? The existing per-hospital OOD detectors were already shown
+(section 15) to be unsafe as a hard gate — they answer "does this match Kermany/RSNA
+specifically," not "is this a chest X-ray at all," and block real X-rays from other sources.
+A real, dedicated gate for the actual question asked was needed.
+
+**First approach tried and rejected on real evidence: mean color saturation.** Chest X-rays are
+fundamentally grayscale, so a simple heuristic seemed promising — tested before writing any
+code. It failed: a real X-ray (`sample2.jpg`, saturation 0.072) and a non-X-ray logo wallpaper
+(0.079) were indistinguishable, and a non-X-ray anime wallpaper (0.0008) was *more* grayscale
+than either. Color alone doesn't separate these; no code was built on this idea.
+
+**Second approach: a supervised gate trained on real X-rays vs. synthetic non-X-ray surrogates**
+(new `src/uncertainty/xray_gate.py`, logistic regression on pooled features — scikit-learn
+already pinned, no new dependency), reusing `scripts/build_ood_detector.py`'s own OPT-5 synthetic
+generator (random noise + structured colored shapes through the real frozen backbone) for
+negatives, since no external non-medical image dataset is available in this project. **Also
+tested, and also failed**: perfect (1.0) accuracy on held-out synthetic data, but both real
+non-X-ray photos held out from training were misclassified as X-rays (one at 92% confidence) —
+synthetic noise/shapes don't share real-photo feature statistics closely enough for the decision
+boundary to transfer.
+
+**Third approach — the one that worked, verified against real held-out data:** the same
+supervised setup, but with 35 real, ordinary photos already present locally (wallpapers,
+downloaded images — not a new external dataset, nothing downloaded) mixed into the negative
+class alongside the synthetic ones. Validated against 6 different real photos held out
+entirely from training (never seen at all, including the two that failed the previous
+approach): **all 6 correctly rejected**, all at high confidence (p_xray < 0.005), while both
+known real chest X-rays (`sample.jpeg`, `sample2.jpg`) stayed correctly accepted (p_xray = 1.0)
+and held-out real X-ray val/test sets stayed at 1.0 accuracy. Small amounts of real photo
+diversity generalize where synthetic surrogates alone do not.
+
+**What's committed vs. what isn't:** only the fitted model's ~1,025 floating-point weights
+(`src/uncertainty/xray_gate_weights.json`, plain JSON, ~24KB) are committed. The 35 bootstrap
+photos are **not** — many are copyrighted wallpapers/fan art, inappropriate to redistribute in
+a public repository, and a hardcoded path into someone's personal `~/Pictures` folder wouldn't
+be portable to another machine regardless. `scripts/build_xray_gate.py` documents the one-time
+local bootstrap that produced the committed weights; re-running it on another machine means
+pointing it at whatever real, non-medical photos are available there.
+
+**Wired in as a real, hard gate** (`app/streamlit_app.py`): runs before the expensive
+MC-Dropout/Grad-CAM pipeline, using a dedicated always-frozen `DenseNet121Head()` instance —
+deliberately *not* whichever checkpoint the user has selected for diagnosis, since round 9's
+partially-unfrozen backbone would feed the gate a different feature distribution than it was
+trained on (the same frozen-backbone-cache mismatch already found and handled for deferral/OOD).
+A rejected image gets a clear error message and no analysis runs at all — no prediction, no
+Grad-CAM, no wasted compute.
+
+**Verified:** 2 new tests in `tests/test_app_inference.py` (accepts a real cached test X-ray;
+rejects synthetic random noise — portable to any environment, not dependent on local photo
+files). Full suite: 207/207 passing.
+
+## 17. Code changes (summary — full detail in section 4)
 
 - `src/models/densenet_head.py`: added `fine_tune_last_block: bool = False` to
   `DenseNet121Head`. Default-off, fully backward compatible with every existing
@@ -924,5 +981,16 @@ shown first) instead of being blocked. Full suite re-run: 205/205 passing.
   uploaded image's own bytes — deterministic per image (section 15).
 - `app/streamlit_app.py`: reverted section 14's hard OOD block; the caution
   note leads instead, the result is always shown (section 15).
+- `src/uncertainty/xray_gate.py` (new): supervised chest-X-ray input gate —
+  fit/predict/save/load (section 16).
+- `src/uncertainty/xray_gate_weights.json` (new, committed): the fitted
+  gate's ~1,025 weights only — no training images (section 16).
+- `scripts/build_xray_gate.py` (new): one-time local bootstrap that produced
+  the committed weights (section 16).
+- `app/inference.py`: `load_xray_gate`/`check_is_xray`, using a dedicated
+  always-frozen backbone instance (section 16).
+- `app/streamlit_app.py`: the gate runs before analysis; a rejected image
+  gets a clear error and no prediction/Grad-CAM is computed (section 16).
+- `tests/test_app_inference.py`: 2 new tests for the gate (section 16).
 - No existing checkpoint or documented research result (Stage 21 ablation table,
   centralized pilot) was modified or deleted.

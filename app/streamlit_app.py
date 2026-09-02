@@ -121,6 +121,13 @@ def get_ood_detectors():
         return None, None
 
 
+@st.cache_resource(show_spinner=False)
+def get_xray_gate():
+    if not inference.XRAY_GATE_WEIGHTS_PATH.exists():
+        return None
+    return inference.load_xray_gate()
+
+
 def artifacts_available() -> bool:
     return (REPO_ROOT / CFG.paths.partition_path).exists() and (REPO_ROOT / CFG.paths.feature_cache_dir).exists()
 
@@ -272,6 +279,16 @@ with tab_analyze:
                     except ValueError as exc:
                         st.error(f"Could not read this file: {exc}")
                         st.stop()
+
+                    xray_gate = get_xray_gate()
+                    if xray_gate is not None:
+                        gate_result = inference.check_is_xray(bgr_image, xray_gate)
+                        if not gate_result.is_xray:
+                            st.error(
+                                "This doesn't look like a chest X-ray, so no analysis was run. "
+                                "Please upload a chest X-ray image."
+                            )
+                            st.stop()
 
                     effective_threshold = deferral_threshold if deferral_threshold is not None else float("inf")
                     result = inference.run_full_inference(
