@@ -306,65 +306,84 @@ with tab_analyze:
                 # drops the false-positive rate on real held-out images to ~0-10%.
                 flagged_ood = all(result.ood_flags.values()) if result.ood_flags else False
 
-                st.markdown(
-                    c.result_label(result.predicted_label, attention=is_pneumonia, uncertain=result.abstained),
-                    unsafe_allow_html=True,
-                )
-                st.markdown(
-                    c.confidence_meter(result.confidence, attention=is_pneumonia, uncertain=result.abstained),
-                    unsafe_allow_html=True,
-                )
-
-                if result.abstained:
+                # An OOD-flagged image gets NO confident Normal/Pneumonia headline at
+                # all -- previously this note was the LAST thing rendered, appearing
+                # after a large "Normal 83%" headline and a "falls within normal
+                # confidence range" reassurance, which is actively misleading on an
+                # image that isn't a chest X-ray to begin with (found 2026-09-02: a
+                # real non-X-ray photo still displayed a confident Normal/Pneumonia
+                # result with a caution note buried beneath it). The
+                # Normal/Pneumonia label and its confidence number are suppressed
+                # entirely here, not just annotated.
+                if flagged_ood:
                     st.markdown(
-                        c.confidence_note(
-                            "This X-ray's result was too close to the model's decision boundary to call "
-                            "confidently either way — further evaluation is recommended rather than "
-                            "treating this as a Normal or Pneumonia result.",
-                            uncertain=True,
-                        ),
+                        c.result_label("Cannot analyze", uncertain=True),
                         unsafe_allow_html=True,
                     )
-                elif low_confidence:
                     st.markdown(
                         c.confidence_note(
-                            "Low confidence — further clinical review recommended. The model was not "
-                            "confident enough in this case to rely on the prediction alone.",
-                            attention=True,
+                            "This image looks visually different from every hospital's training data — an "
+                            "unusual scan, different equipment, or not a chest X-ray at all. No reliable "
+                            "Normal/Pneumonia result can be produced for it, so none is shown.",
+                            uncertain=True,
                         ),
                         unsafe_allow_html=True,
                     )
                 else:
                     st.markdown(
-                        c.confidence_note("This prediction falls within the model's normal confidence range."),
+                        c.result_label(result.predicted_label, attention=is_pneumonia, uncertain=result.abstained),
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        c.confidence_meter(result.confidence, attention=is_pneumonia, uncertain=result.abstained),
                         unsafe_allow_html=True,
                     )
 
+                    if result.abstained:
+                        st.markdown(
+                            c.confidence_note(
+                                "This X-ray's result was too close to the model's decision boundary to call "
+                                "confidently either way — further evaluation is recommended rather than "
+                                "treating this as a Normal or Pneumonia result.",
+                                uncertain=True,
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                    elif low_confidence:
+                        st.markdown(
+                            c.confidence_note(
+                                "Low confidence — further clinical review recommended. The model was not "
+                                "confident enough in this case to rely on the prediction alone.",
+                                attention=True,
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            c.confidence_note("This prediction falls within the model's normal confidence range."),
+                            unsafe_allow_html=True,
+                        )
+
                 if flagged_ood:
+                    # No Grad-CAM for a result we've just said isn't reliable — a
+                    # heatmap tied to an arbitrary predicted class on a non-X-ray
+                    # image would contradict the message above.
+                    st.image(result.rgb_image, caption="Uploaded image", width="stretch")
+                else:
+                    st.markdown(c.subhead("Model explanation"), unsafe_allow_html=True)
                     st.markdown(
-                        c.confidence_note(
-                            "This image looks visually different from the X-rays the model was trained on "
-                            "(unusual scan, different equipment, or non-chest image). Treat this result with "
-                            "extra caution.",
-                            attention=True,
+                        c.prose(
+                            "The highlighted regions below show which parts of the X-ray most influenced the "
+                            "result — this is not a diagnosis of a specific area, just a visual guide to where "
+                            "the model focused."
                         ),
                         unsafe_allow_html=True,
                     )
-
-                st.markdown(c.subhead("Model explanation"), unsafe_allow_html=True)
-                st.markdown(
-                    c.prose(
-                        "The highlighted regions below show which parts of the X-ray most influenced the "
-                        "result — this is not a diagnosis of a specific area, just a visual guide to where "
-                        "the model focused."
-                    ),
-                    unsafe_allow_html=True,
-                )
-                img_col1, img_col2 = st.columns(2)
-                with img_col1:
-                    st.image(result.rgb_image, caption="X-ray", width="stretch")
-                with img_col2:
-                    st.image(result.gradcam_overlay_rgb, caption="What the model focused on", width="stretch")
+                    img_col1, img_col2 = st.columns(2)
+                    with img_col1:
+                        st.image(result.rgb_image, caption="X-ray", width="stretch")
+                    with img_col2:
+                        st.image(result.gradcam_overlay_rgb, caption="What the model focused on", width="stretch")
 
                 with st.expander("Advanced technical details"):
                     if uses_finetuned_backbone:
