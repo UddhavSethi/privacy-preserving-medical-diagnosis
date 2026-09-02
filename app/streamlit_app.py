@@ -38,6 +38,7 @@ from omegaconf import OmegaConf
 
 from app import components as c
 from app import inference, results_loader, theme
+from src.data.feature_cache import FeatureCacheKey
 
 st.set_page_config(
     page_title="PneumoFL — AI-Assisted Chest X-ray Analysis",
@@ -81,41 +82,54 @@ def get_model(checkpoint_rel_path: str, fine_tune_last_block: bool = False):
     return inference.load_classifier(path, fine_tune_last_block=fine_tune_last_block)
 
 
+FINETUNED_FEATURE_KEY = FeatureCacheKey(
+    image_size=224, num_augmented_views=0, rotation_degrees=10.0, brightness=0.1, contrast=0.1
+)  # must match scripts/build_feature_cache_finetuned.py exactly, or the cache
+   # simply won't be found (a real bug hit and fixed 2026-09-02 -- see
+   # docs/adr1_groupnorm_fallback.md §19).
+
+
+def _feature_cache_dir_for(fine_tune_last_block: bool) -> Path:
+    # Stage 9's cache assumes a frozen backbone -- invalid for a fine-tuned one
+    # (docs/adr1_groupnorm_fallback.md §8's own note). round 9 gets its own
+    # cache, built from its own backbone (§19) via
+    # scripts/build_feature_cache_finetuned.py.
+    rel = CFG.paths.feature_cache_finetuned_dir if fine_tune_last_block else CFG.paths.feature_cache_dir
+    return REPO_ROOT / rel
+
+
+def _feature_key_for(fine_tune_last_block: bool):
+    return FINETUNED_FEATURE_KEY if fine_tune_last_block else inference.DEFAULT_FEATURE_KEY
+
+
 @st.cache_resource(show_spinner=False)
 def get_deferral_threshold(checkpoint_rel_path: str, fine_tune_last_block: bool = False) -> float | None:
-    if fine_tune_last_block:
-        # Stage 9's pooled-feature cache (what calibrate_deferral_threshold reads)
-        # is a frozen-backbone artifact -- see docs/adr1_groupnorm_fallback.md's
-        # own note that this cache "is invalid the moment part of the backbone
-        # becomes trainable." Calibrating against it here would silently produce
-        # a threshold derived from features this checkpoint's backbone never
-        # actually generated. Returning None makes deferral explicitly
-        # unavailable for this checkpoint instead of quietly wrong.
-        return None
     model = get_model(checkpoint_rel_path, fine_tune_last_block)
     if model is None:
         return None
     partition_path = REPO_ROOT / CFG.paths.partition_path
-    feature_cache_dir = REPO_ROOT / CFG.paths.feature_cache_dir
+    feature_cache_dir = _feature_cache_dir_for(fine_tune_last_block)
     if not partition_path.exists() or not feature_cache_dir.exists():
         return None
     try:
         return inference.calibrate_deferral_threshold(
-            model, partition_path, feature_cache_dir, CFG.deferral.target_defer_fraction, CFG.mc_dropout.num_passes
+            model, partition_path, feature_cache_dir, CFG.deferral.target_defer_fraction, CFG.mc_dropout.num_passes,
+            feature_key=_feature_key_for(fine_tune_last_block),
         )
     except Exception:
         return None
 
 
 @st.cache_resource(show_spinner=False)
-def get_ood_detectors():
+def get_ood_detectors(fine_tune_last_block: bool = False):
     partition_path = REPO_ROOT / CFG.paths.partition_path
-    feature_cache_dir = REPO_ROOT / CFG.paths.feature_cache_dir
+    feature_cache_dir = _feature_cache_dir_for(fine_tune_last_block)
     if not partition_path.exists() or not feature_cache_dir.exists():
         return None, None
     try:
         return inference.build_ood_detectors(
-            partition_path, feature_cache_dir, HOSPITALS, CFG.ood_detector.detector_seed, CFG.ood_detector.target_flag_fraction
+            partition_path, feature_cache_dir, HOSPITALS, CFG.ood_detector.detector_seed, CFG.ood_detector.target_flag_fraction,
+            feature_key=_feature_key_for(fine_tune_last_block),
         )
     except Exception:
         return None, None
@@ -259,16 +273,7 @@ with tab_analyze:
             else:
                 model = get_model(active_config["checkpoint"], uses_finetuned_backbone)
                 deferral_threshold = get_deferral_threshold(active_config["checkpoint"], uses_finetuned_backbone)
-                if uses_finetuned_backbone:
-                    # Same frozen-backbone-cache mismatch as deferral (see
-                    # get_deferral_threshold) -- OOD detectors are calibrated
-                    # against Stage 9's cached features, which this checkpoint's
-                    # partially-unfrozen backbone would not itself produce.
-                    # Skip rather than show a flag calibrated against the wrong
-                    # feature distribution.
-                    ood_detectors, ood_thresholds = {}, {}
-                else:
-                    ood_detectors, ood_thresholds = get_ood_detectors()
+                ood_detectors, ood_thresholds = get_ood_detectors(uses_finetuned_backbone)
 
                 with st.spinner("Analyzing..."):
                     t0 = time.time()
@@ -398,13 +403,12 @@ with tab_analyze:
                     st.image(result.gradcam_overlay_rgb, caption="What the model focused on", width="stretch")
 
                 with st.expander("Advanced technical details"):
-                    if uses_finetuned_backbone:
+                    if deferral_threshold is None:
                         st.markdown(
                             c.confidence_note(
-                                "This experimental checkpoint's deferral threshold and out-of-distribution "
-                                "checks are unavailable (calibration cache mismatch — see "
-                                "docs/adr1_groupnorm_fallback.md §6), not confirmed absent of concern. "
-                                "Treat every prediction from this model as undeferred/unchecked.",
+                                "This checkpoint's deferral threshold and out-of-distribution checks are "
+                                "unavailable in this environment (missing calibration artifacts), not "
+                                "confirmed absent of concern. Treat this prediction as undeferred/unchecked.",
                                 attention=True,
                             ),
                             unsafe_allow_html=True,
@@ -419,7 +423,7 @@ with tab_analyze:
                         f"- Abstained (Uncertain result): `{result.abstained}`\n"
                         f"- Uncertainty (predictive entropy): `{result.entropy:.4f}`\n"
                         f"- Deferral threshold: `{result.deferral_threshold:.4f}`"
-                        + (" (unavailable — see note above)" if uses_finetuned_backbone else "")
+                        + (" (unavailable — see note above)" if deferral_threshold is None else "")
                         + "\n"
                         f"- Deferred for review: `{result.deferred}`\n"
                         f"- Analysis time: `{elapsed:.2f}s`\n"

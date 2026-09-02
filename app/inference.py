@@ -30,7 +30,9 @@ from sklearn.ensemble import IsolationForest
 from src.data.preprocessing import ClaheParams, preprocess_to_rgb, window_pixel_array_to_uint8
 from src.data.transforms import build_eval_transform
 from src.explain.gradcam import NORMAL_CLASS_INDEX, PNEUMONIA_CLASS_INDEX, generate_overlay
+from src.data.feature_cache import FeatureCacheKey
 from src.models.densenet_head import DenseNet121Head
+from src.training.trainer import FEATURE_KEY as DEFAULT_FEATURE_KEY
 from src.training.trainer import load_hospital_features, load_pooled_features
 from src.uncertainty.deferral import compute_deferral
 from src.uncertainty.mc_dropout import MCDropoutResult, compute_mc_dropout_uncertainty
@@ -224,6 +226,7 @@ def calibrate_deferral_threshold(
     feature_cache_dir: Path,
     target_defer_fraction: float,
     num_mc_passes: int = 20,
+    feature_key: FeatureCacheKey = DEFAULT_FEATURE_KEY,
 ) -> float:
     """DG-10's deferral policy (`src.uncertainty.deferral.compute_deferral`) is
     defined relative to a BATCH's own uncertainty distribution ("defer the worst
@@ -234,8 +237,10 @@ def calibrate_deferral_threshold(
     already used it) and freeze the resulting entropy threshold as an absolute
     operating point. This calls `compute_deferral` directly on that reference
     batch — the exact same function DG-10 uses — rather than inventing a new
-    single-example policy."""
-    pooled = load_pooled_features(partition_path, ["A", "B", "C"], feature_cache_dir)
+    single-example policy. `feature_key` — see `load_hospital_features`
+    (src/training/trainer.py); defaults to Stage 9's own frozen-backbone key,
+    overridden for round 9's own cache (docs/adr1_groupnorm_fallback.md §19)."""
+    pooled = load_pooled_features(partition_path, ["A", "B", "C"], feature_cache_dir, feature_key)
     mc_result = compute_mc_dropout_uncertainty(model, pooled.val_features, num_passes=num_mc_passes)
     return compute_deferral(mc_result.entropy, target_defer_fraction).threshold
 
@@ -246,14 +251,16 @@ def build_ood_detectors(
     hospitals: list[str],
     seed: int,
     target_flag_fraction: float,
+    feature_key: FeatureCacheKey = DEFAULT_FEATURE_KEY,
 ) -> tuple[dict[str, IsolationForest], dict[str, float]]:
     """One Isolation Forest per hospital (`src.uncertainty.ood_detector`, OPT-5) —
     trained on that hospital's own real cached training features, calibrated on
     its own held-out val set. Returns (detectors, thresholds), both keyed by
-    hospital, for `run_full_inference` to score a new image against all three."""
+    hospital, for `run_full_inference` to score a new image against all three.
+    `feature_key` — see `calibrate_deferral_threshold`."""
     detectors, thresholds = {}, {}
     for hospital in hospitals:
-        features = load_hospital_features(partition_path, hospital, feature_cache_dir)
+        features = load_hospital_features(partition_path, hospital, feature_cache_dir, feature_key)
         train_features = features.train_features[:, -1, :].numpy()
         val_features = features.val_features.numpy()
         detector, calibration = build_and_calibrate(

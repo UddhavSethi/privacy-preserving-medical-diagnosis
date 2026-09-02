@@ -48,7 +48,10 @@ class HospitalFeatures:
 
 
 def load_hospital_features(
-    partition_path: Path, hospital: str, feature_cache_dir: Path = FEATURE_CACHE_DIR
+    partition_path: Path,
+    hospital: str,
+    feature_cache_dir: Path = FEATURE_CACHE_DIR,
+    feature_key: FeatureCacheKey = FEATURE_KEY,
 ) -> HospitalFeatures:
     """Load one hospital's cached features for train/val/test, filtered from the
     relevant source's full feature bank by patient_id membership (a hospital may be
@@ -62,6 +65,14 @@ def load_hospital_features(
     this function did, would silently drop every record from the other source for
     a mixed-source client. Natural/balanced hospitals (always single-source) are
     unaffected — this is a strict generalization, not a behavior change for them.
+
+    `feature_key` defaults to Stage 9's own frozen-backbone key
+    (`FEATURE_KEY`) — every existing caller is unaffected. Added 2026-09-02 so
+    `scripts/build_feature_cache_finetuned.py`'s cache (a different backbone,
+    ADR-1's GroupNorm fallback, `num_augmented_views=0` since nothing that
+    reads this cache for deferral/OOD purposes touches the augmented views —
+    docs/adr1_groupnorm_fallback.md §19) can be read through the same
+    function instead of duplicating this logic.
     """
     partition = json.loads(partition_path.read_text())
     hospital_records = partition["hospitals"][hospital]
@@ -80,7 +91,7 @@ def load_hospital_features(
         feats_by_source = []
         labels_by_source = []
         for source, patient_ids in sorted(by_split_source[split].items()):
-            bank_path = cache_file_path(feature_cache_dir, source, split, FEATURE_KEY)
+            bank_path = cache_file_path(feature_cache_dir, source, split, feature_key)
             bank = load_feature_bank(bank_path)
             id_to_idx = {rid: i for i, rid in enumerate(bank["record_ids"])}
             idx = [id_to_idx[pid] for pid in patient_ids if pid in id_to_idx]
@@ -99,7 +110,7 @@ def load_hospital_features(
             # zero val/test examples for a given split fails downstream (e.g. an
             # AUROC computation on empty labels) exactly where it always did, not
             # here with an unrelated torch.cat error.
-            num_views = FEATURE_KEY.num_augmented_views + 1
+            num_views = feature_key.num_augmented_views + 1
             shape = (0, num_views, 1024) if all_views else (0, 1024)
             return torch.empty(shape), torch.empty(0, dtype=torch.long)
         feats = torch.cat(feats_by_source, dim=0)
@@ -124,12 +135,13 @@ def load_pooled_features(
     partition_path: Path,
     hospitals: list[str],
     feature_cache_dir: Path = FEATURE_CACHE_DIR,
+    feature_key: FeatureCacheKey = FEATURE_KEY,
 ) -> HospitalFeatures:
     """Pool multiple hospitals' cached features together (Stage 12: centralized
     baseline) — concatenates train/val/test across all given hospitals. Same view
     dimension (K augmented + 1 eval) for every hospital, so concatenation on the
-    sample dimension is safe."""
-    per_hospital = [load_hospital_features(partition_path, h, feature_cache_dir) for h in hospitals]
+    sample dimension is safe. `feature_key` — see `load_hospital_features`."""
+    per_hospital = [load_hospital_features(partition_path, h, feature_cache_dir, feature_key) for h in hospitals]
 
     def _cat(attr: str) -> torch.Tensor:
         return torch.cat([getattr(hf, attr) for hf in per_hospital], dim=0)
