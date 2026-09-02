@@ -15,6 +15,7 @@ require the frontend framework to be tested.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 from dataclasses import dataclass
 from pathlib import Path
@@ -138,6 +139,13 @@ def run_full_inference(
     with torch.no_grad():
         pooled_features = model.pooled_features(tensor)  # (1, 1024)
 
+    # MC Dropout's T stochastic passes are otherwise unseeded, so re-analyzing
+    # the SAME uploaded image gave a different confidence (and occasionally a
+    # different Uncertain/not verdict) every time — found live, 2026-09-02.
+    # Seeding from the image's own bytes makes a given image's result exactly
+    # reproducible on every re-upload, while still giving different images
+    # different (not all-identical) dropout mask sequences.
+    torch.manual_seed(int.from_bytes(hashlib.sha256(bgr_image.tobytes()).digest()[:8], "big") % (2**31))
     mc_result: MCDropoutResult = compute_mc_dropout_uncertainty(model, pooled_features, num_passes=num_mc_passes)
     calibrated_probs = apply_temperature(mc_result.mean_probs, temperature)
     prob_pneumonia = float(calibrated_probs[0, PNEUMONIA_CLASS_INDEX].item())
