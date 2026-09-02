@@ -41,11 +41,17 @@ HOSPITALS = ["A", "B", "C"]
 IMAGE_SIZE = 224
 
 # One-time local bootstrap set -- real, ordinary photos already on this
-# machine (wallpapers, downloads), used only to fit the committed weights
-# above, never committed themselves. A handful are deliberately held out
-# below to check generalization before trusting the fit.
+# machine, used only to fit the committed weights above, never committed
+# themselves. Expanded 2026-09-02 (priority-3 pre-deployment item) beyond the
+# original wallpapers-only set to add real category diversity -- terminal
+# screenshots, tool assets, a plot/figure image, a code-scraping diagram --
+# since a negative class that's all wallpapers is itself a narrow slice of
+# "real photos." A handful from EACH category are deliberately held out below
+# to check generalization across the new diversity too, not just re-validate
+# the original wallpaper-only held-out set.
 _PICTURES = Path("/home/uddhav/Pictures")
 _DOWNLOADS = Path("/home/uddhav/Downloads")
+_HOME = Path("/home/uddhav")
 REAL_PHOTO_PATHS = [
     _DOWNLOADS / "musashi2.jpeg", _DOWNLOADS / "musashi3.jpg", _DOWNLOADS / "_.jpeg",
     _DOWNLOADS / "spiderman, spiderman wallpaper, spiderman brand new day, peter parker.jpeg",
@@ -67,8 +73,38 @@ REAL_PHOTO_PATHS = [
     _PICTURES / "wallpapers" / "ss6.png", _PICTURES / "wallpapers" / "ss7.png",
     _PICTURES / "wallpapers" / "strokes.png", _PICTURES / "wallpapers" / "gojo.jpeg",
     _PICTURES / "wallpapers" / "gojo2.jpeg", _PICTURES / "wallpapers" / "batsymbol.jpeg",
+    _HOME / "Pasted image.png",
+    _HOME / "gnome-terminal" / "screenshot.png", _HOME / "gnome-terminal" / "dracula-pro.png",
+    _HOME / "DA3_Blockchain" / "screenshots" / "q2_fig1.png",
+    _HOME / "DA3_Blockchain" / "screenshots" / "vit_logo.png",
+    _HOME / "DA3_Blockchain" / "screenshots" / "q1_fig1.png",
+    _HOME / "DA3_Blockchain" / "screenshots" / "q2_fig4.png",
+    _HOME / "DA3_Blockchain" / "screenshots" / "q1_fig3.png",
+    _HOME / "DA3_Blockchain" / "screenshots" / "q2_fig5.png",
+    _HOME / "DA3_Blockchain" / "screenshots" / "q1_fig2.png",
+    _HOME / "DA3_Blockchain" / "screenshots" / "q2_fig6.png",
+    _HOME / "DA3_Blockchain" / "screenshots" / "q2_fig3.png",
+    _HOME / "DA3_Blockchain" / "screenshots" / "q2_fig2.png",
+    _HOME / "paramspider" / "static" / "paramspider.png",
+    _HOME / "Osintgram" / ".img" / "carbon.png",
+    _HOME / "crt.sh" / "Screenshot" / "Screenshot_Org.png",
+    _HOME / "crt.sh" / "Screenshot" / "Screenshot_Help.png",
+    _HOME / "crt.sh" / "Screenshot" / "Screenshot_Domain.png",
+    _HOME / "ani-cli" / ".assets" / "windows-terminal-git-bash-2.png",
+    _HOME / "ani-cli" / ".assets" / "windows-terminal-git-bash-4.png",
+    _HOME / "ani-cli" / ".assets" / "ani-cli-scraping-flow.png",
+    _HOME / "ani-cli" / ".assets" / "ani-cli-ux-spec.png",
+    _HOME / "ani-cli" / ".assets" / "windows-terminal-git-bash-1.png",
+    _HOME / "ani-cli" / ".assets" / "dream.png",
+    _HOME / "ani-cli" / ".assets" / "windows-terminal-git-bash-3.png",
 ]
-HELD_OUT_NAMES = {"gojo2.jpeg", "batsymbol.jpeg", "Spiderman.jpeg", "Toji.jpeg", "ss1.png", "musashi.jpeg"}
+HELD_OUT_NAMES = {
+    "gojo2.jpeg", "batsymbol.jpeg", "Spiderman.jpeg", "Toji.jpeg", "ss1.png", "musashi.jpeg",
+    "screenshot.png",  # gnome-terminal
+    "q2_fig1.png", "vit_logo.png",  # DA3_Blockchain
+    "Screenshot_Org.png",  # crt.sh
+    "ani-cli-scraping-flow.png", "dream.png",  # ani-cli
+}
 
 
 def _features_for(model: DenseNet121Head, transform, path: Path) -> np.ndarray | None:
