@@ -43,6 +43,20 @@ configurations:
     checkpoint: outputs/checkpoints/ablation/fedavg_natural_seed42.pt
     description: "The federated global model — no Differential Privacy, no Secure Aggregation."
     privacy_preserving: false
+    # Decision policy (docs/adr1_groupnorm_fallback.md §18, owner-directed
+    # 2026-09-02) -- same methodology as round 9's own §10, applied to the
+    # app's actual default checkpoint. decision_threshold: Youden's-J optimum
+    # on val (sens=0.841, spec=0.680), replacing the previous implicit 0.5
+    # (sens=0.787, spec=0.720) -- missed-pneumonia count drops 321->240 (25%
+    # relative reduction) at a real specificity cost, mirroring round 9's own
+    # tradeoff. abstention_half_width: 0.05 lands at 10.14% val abstention,
+    # matching this project's existing DG-10 10%-deferral convention almost
+    # exactly. temperature: fit on val (T=1.1402) -- unlike round 9, this
+    # checkpoint genuinely is somewhat overconfident (softening helps here,
+    # not sharpening): ECE improved 0.0207->0.0111, a real ~46% reduction.
+    decision_threshold: 0.45
+    abstention_half_width: 0.05
+    temperature: 1.1402
   - key: fedavg_dp_eps1
     label: "FedAvg + DP (epsilon=1, strongest privacy)"
     checkpoint: outputs/checkpoints/ablation/dp_eps1.0_seed42.pt
