@@ -9,6 +9,7 @@ required, which is the whole point of keeping Streamlit out of that module.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import cv2
@@ -67,6 +68,46 @@ def test_preprocess_image_produces_model_ready_tensor():
 def test_load_classifier_produces_a_working_model():
     model = inference.load_classifier(CENTRALIZED_CHECKPOINT)
     assert isinstance(model, inference.DenseNet121Head)
+
+
+requires_xray_gate = pytest.mark.skipif(
+    not inference.XRAY_GATE_WEIGHTS_PATH.exists(),
+    reason="requires committed xray_gate_weights.json (scripts/build_xray_gate.py)",
+)
+
+
+@requires_xray_gate
+def test_xray_gate_accepts_a_real_chest_xray():
+    if not PARTITION_PATH.exists():
+        pytest.skip("requires the real partition for a genuine test X-ray")
+    partition = json.loads(PARTITION_PATH.read_text())
+    from src.data.preprocessing import ClaheParams, cache_path_for, load_from_cache
+
+    record = next(r for r in partition["hospitals"]["A"] if r["frozen_split"] == "test")
+    clahe_cache_dir = REPO_ROOT / "data" / "clahe_cache"
+    cache_path = cache_path_for(clahe_cache_dir, record["source"], record["relative_path"], ClaheParams())
+    if not cache_path.exists():
+        pytest.skip("CLAHE cache entry for this record not present")
+    rgb_image = load_from_cache(cache_path)
+    bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
+
+    gate = inference.load_xray_gate()
+    result = inference.check_is_xray(bgr_image, gate)
+    assert result.is_xray is True
+
+
+@requires_xray_gate
+def test_xray_gate_rejects_random_noise():
+    # Not the exact bootstrap negatives (those are local, uncommitted real
+    # photos — see scripts/build_xray_gate.py) but the same synthetic-noise
+    # generation the gate was trained to reject alongside them, and portable
+    # to any environment (CI included) without needing local image files.
+    rng = np.random.default_rng(123)
+    noise_bgr = rng.integers(0, 256, size=(224, 224, 3), dtype=np.uint8)
+
+    gate = inference.load_xray_gate()
+    result = inference.check_is_xray(noise_bgr, gate)
+    assert result.is_xray is False
 
 
 @requires_real_artifacts
