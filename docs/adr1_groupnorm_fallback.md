@@ -728,7 +728,65 @@ training, an afternoon-scale script, not a multi-day one). Not run here; offered
 low-cost next step if the question is "how much would this actually buy us," rather than
 committing to the full re-run.
 
-## 13. Code changes (summary — full detail in section 4)
+## 13. Zero-cost diagnostic: filtering-and-retraining would very likely just re-measure a ceiling we already have (2026-09-02)
+
+Owner asked, reasonably, given section 12's finding: "can't we shrink [the dataset] and
+retrain, but with more rounds?" Worth taking seriously — filtering only touches the partition
+file, not the CLAHE cache, and a smaller RSNA pool (removing "No Lung Opacity / Not Normal"
+shrinks it by ~44%, matching CLAUDE.md's own DG-3 estimate) means each round is *cheaper*, so
+more rounds is affordable, not prohibitive. Section 12's original "full 27-run re-run" cost
+estimate was about keeping the whole ablation ladder comparable, not about this one scoped
+variant — that framing doesn't apply here, and saying so plainly matters more than being
+consistent with what was said an hour earlier.
+
+But there's a real methodological question underneath the cost question: filtering *training*
+data doesn't remove the ambiguity from the real world a deployed model has to face. Two
+different experiments were being conflated:
+- Filter train only, evaluate on the original (unfiltered) test set — the clinically honest
+  comparison, but the model would have zero training signal at all for these cases, plausibly
+  making them worse, not better (pure out-of-distribution noise instead of an imperfectly
+  learned association).
+- Filter train **and** test — tells you what's achievable on a cleaner cohort, but the number
+  wouldn't describe real deployment, which will always include patients with findings other
+  than pneumonia.
+
+**Rather than guess which of these a retrain would land on, the second one can be measured
+directly against round 9's existing checkpoint, for free — no retraining, just re-scoring
+already-computed predictions with the ambiguous subgroup excluded from evaluation only.** Run
+as a genuine diagnostic before committing any GPU time:
+
+| Metric | Full test set (n=4,838) | Excluding ambiguous subgroup (n=3,077) |
+|---|---|---|
+| AUROC | 0.856 | **0.970** |
+| Accuracy | 0.772 | **0.904** |
+| Precision | 0.594 | **0.963** |
+| Sensitivity | 0.836 | 0.836 (unchanged) |
+| Specificity | 0.743 | **0.969** |
+| F1 | 0.695 | **0.895** |
+| False negatives | 246 | 246 (unchanged) |
+| False positives | 857 | **49** |
+
+(AUROC/sensitivity here differ slightly from section 9/10's MC-Dropout-averaged numbers because
+this diagnostic scores a deterministic single forward pass, matching section 10.1's own noted
+inconsistency between the two pipelines — not a new finding, the same one, showing up again.)
+
+**Reading this: round 9's checkpoint, completely unmodified, already sits at 0.97 AUROC and
+97% specificity on the unambiguous population.** Sensitivity is *exactly* identical either way
+(0.836), and false negatives don't move at all (246 both ways) — the ambiguous subgroup
+contributes zero missed-pneumonia cases; this was purely ever a false-positive problem, and it's
+now confirmed to be concentrated entirely in images that don't actually look normal.
+
+**Conclusion: retraining — filtered or not — is very unlikely to move this further, because the
+model isn't demonstrating a fixable weakness here.** It already reaches near-ceiling performance
+on the part of the task that's genuinely learnable (clean-normal vs. pneumonia); a filtered
+retrain would plausibly just reproduce a number this diagnostic already produced for zero
+additional GPU-hours. **Recommendation: do not retrain.** Report both numbers in the paper
+instead — full-population AUROC (0.856, the honest, realistic figure) alongside the
+unambiguous-subset AUROC (0.970, isolating genuine model capability from label-semantics
+noise) — a more specific, more defensible result than either number alone, and one that costs
+nothing further to obtain.
+
+## 14. Code changes (summary — full detail in section 4)
 
 - `src/models/densenet_head.py`: added `fine_tune_last_block: bool = False` to
   `DenseNet121Head`. Default-off, fully backward compatible with every existing
