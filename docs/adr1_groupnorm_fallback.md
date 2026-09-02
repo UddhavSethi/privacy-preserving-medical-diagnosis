@@ -911,7 +911,43 @@ Grad-CAM, no wasted compute.
 rejects synthetic random noise — portable to any environment, not dependent on local photo
 files). Full suite: 207/207 passing.
 
-## 17. Code changes (summary — full detail in section 4)
+## 17. Extending threshold/calibration/abstention to the app's actual default checkpoint (2026-09-02)
+
+Owner-directed, part of a pre-deployment gap list: everything in sections 9-10 (threshold sweep,
+calibration, abstention) was scoped to round 9 only. The checkpoint most people actually see —
+`fedavg_no_dp`, the app's real default — still had the old, never-examined 0.5 threshold with
+no calibration and no abstention. Ran the identical methodology against it (cheaper here: this
+checkpoint is frozen-backbone, so Stage 9's cached pooled features apply directly — no raw-image
+pipeline needed, unlike round 9).
+
+| | Old default (0.50) | Recommended (0.45, Youden's-J) |
+|---|---|---|
+| Sensitivity | 0.787 | **0.841** |
+| Specificity | 0.720 | 0.680 |
+| F1 | 0.655 | 0.660 |
+| FN (missed pneumonia) | 321 | **240** (25% relative reduction) |
+
+Same directional tradeoff as round 9's own result (sensitivity up, specificity down, real
+but smaller than the more aggressive alternatives that were computed and rejected there too).
+
+**Calibration result differs meaningfully from round 9's, and that difference is itself the
+finding:** fitted T = **1.1402** — *softening*, the opposite direction from round 9's 0.935. This
+checkpoint genuinely is somewhat overconfident (unlike round 9, where MC Dropout's own averaging
+already calibrated it well) — softening measurably helps: ECE **0.0207 → 0.0111**, a real ~46%
+relative reduction, a much cleaner win than round 9's marginal one. Two checkpoints, two
+different calibration directions, both measured rather than assumed — exactly the point of
+doing this per-checkpoint rather than reusing one number everywhere.
+
+Abstention half-width 0.05 landed at 10.14% validation abstention — almost exactly this
+project's existing DG-10 10%-deferral convention, same choice as round 9.
+
+**Wired into `conf/app.yaml`'s `fedavg_no_dp` entry** — `decision_threshold: 0.45`,
+`abstention_half_width: 0.05`, `temperature: 1.1402`. Verified through the real pipeline (both
+known real X-rays still get sensible predictions) and the full test suite (207/207 passing,
+unchanged — this only adds config values an existing, already-tested code path reads generically
+for any checkpoint).
+
+## 18. Code changes (summary — full detail in section 4)
 
 - `src/models/densenet_head.py`: added `fine_tune_last_block: bool = False` to
   `DenseNet121Head`. Default-off, fully backward compatible with every existing
@@ -992,5 +1028,11 @@ files). Full suite: 207/207 passing.
 - `app/streamlit_app.py`: the gate runs before analysis; a rejected image
   gets a clear error and no prediction/Grad-CAM is computed (section 16).
 - `tests/test_app_inference.py`: 2 new tests for the gate (section 16).
+- `conf/app.yaml`: `fedavg_no_dp` (the app default) gained
+  `decision_threshold: 0.45`, `abstention_half_width: 0.05`,
+  `temperature: 1.1402` (section 17). No code changes — the existing
+  generic threshold/calibration/abstention path already reads these.
+- `outputs/results/default_ckpt_threshold_calibration_analysis.json`: full
+  sweep/calibration/abstention analysis for the default checkpoint.
 - No existing checkpoint or documented research result (Stage 21 ablation table,
   centralized pilot) was modified or deleted.
