@@ -947,7 +947,27 @@ known real X-rays still get sensible predictions) and the full test suite (207/2
 unchanged — this only adds config values an existing, already-tested code path reads generically
 for any checkpoint).
 
-## 18. Code changes (summary — full detail in section 4)
+## 18. X-ray gate: expanded negative set for real category diversity (2026-09-02)
+
+Priority 3 of the pre-deployment gap list. Section 16's gate validated well on 6 held-out real
+photos, but they were almost entirely wallpapers — a narrow slice of "real photos" that doesn't
+say much about generalization to visually different content. Searched the local machine for
+more real, already-present images across genuinely different categories: terminal-theme
+screenshots, tool-documentation assets, a blockchain-assignment figure/logo set, security-tool
+screenshots. Found 66 candidates total (up from 41), spanning at least six visually distinct
+categories instead of one.
+
+Held out 12 images this time (up from 6), specifically including at least one from every new
+category, not just re-testing the original wallpaper-only held-out set. **Result: 12/12 held-out
+real photos correctly rejected**, real X-ray val/test stayed at 1.0 accuracy. Stronger evidence
+of generalization than section 16's original result, not just a bigger number — the new held-out
+set actually tests categories the gate had never seen anything similar to during training.
+
+Weights regenerated (`src/uncertainty/xray_gate_weights.json`, same file, same format — nothing
+downstream needed to change). `tests/test_app_inference.py`'s existing gate tests re-verified
+passing against the updated weights.
+
+## 19. Code changes (summary — full detail in section 4)
 
 - `src/models/densenet_head.py`: added `fine_tune_last_block: bool = False` to
   `DenseNet121Head`. Default-off, fully backward compatible with every existing
@@ -1034,5 +1054,8 @@ for any checkpoint).
   generic threshold/calibration/abstention path already reads these.
 - `outputs/results/default_ckpt_threshold_calibration_analysis.json`: full
   sweep/calibration/abstention analysis for the default checkpoint.
+- `scripts/build_xray_gate.py`: expanded `REAL_PHOTO_PATHS`/`HELD_OUT_NAMES`
+  to 66/12 across 6 categories (section 18).
+- `src/uncertainty/xray_gate_weights.json`: regenerated (same format).
 - No existing checkpoint or documented research result (Stage 21 ablation table,
   centralized pilot) was modified or deleted.
