@@ -14,6 +14,10 @@ paths:
   checkpoint_dir: outputs/checkpoints
   partition_path: data/partitions/hospitals_natural.json
   feature_cache_dir: data/feature_cache
+  # Stage 9's cache assumes a frozen backbone -- invalid for fine_tune_last_block
+  # checkpoints (round 9). scripts/build_feature_cache_finetuned.py builds this
+  # separate cache from round 9's own backbone (docs/adr1_groupnorm_fallback.md §19).
+  feature_cache_finetuned_dir: data/feature_cache_finetuned
   results_dir: outputs/results
   figures_dir: docs/figures
 

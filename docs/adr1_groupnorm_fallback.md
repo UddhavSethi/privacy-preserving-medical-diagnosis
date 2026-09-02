@@ -967,7 +967,52 @@ Weights regenerated (`src/uncertainty/xray_gate_weights.json`, same file, same f
 downstream needed to change). `tests/test_app_inference.py`'s existing gate tests re-verified
 passing against the updated weights.
 
-## 19. Code changes (summary — full detail in section 4)
+## 19. Re-enabling deferral and OOD detection for round 9 (2026-09-02)
+
+Priority 2 of the pre-deployment gap list. Sections 8/10/16 all disabled deferral and per-
+hospital OOD detection for round 9's checkpoint, since Stage 9's feature cache is a frozen-
+backbone artifact and would calibrate against features round 9's own (partially unfrozen)
+backbone never actually produces. This section builds round 9 its own cache and re-enables both.
+
+**`scripts/build_feature_cache_finetuned.py`**: mirrors Stage 9's own `build_feature_cache.py`,
+loading round 9's actual checkpoint instead of a fresh frozen backbone. One deliberate difference:
+`NUM_AUGMENTED_VIEWS=0`, not Stage 9's 5 — neither `calibrate_deferral_threshold` nor
+`build_ood_detectors` ever reads anything but the eval-style view (`[:, -1, :]`), so the 5
+augmented views Stage 9 caches for training-time regularization would have been pure wasted
+compute here, roughly a 5x cost cut on the train split for zero functional difference. Real
+run: kermany (5,856 images) in ~200s, RSNA (26,684 images) in ~730s — under 16 minutes total on
+this machine's GPU, well inside the original 15-30 min estimate.
+
+**A real bug found immediately on first use, not by inspection:** `load_hospital_features`
+(`src/training/trainer.py`) has a module-level `FEATURE_KEY` constant (Stage 9's own,
+`num_augmented_views=5`) baked into its cache-path lookup — pointing it at a *different*
+`feature_cache_dir` alone wasn't enough; it still looked for Stage 9's hash-suffixed path inside
+that directory and raised `FileNotFoundError`, since this cache was built with a different key
+(`num_augmented_views=0`) that hashes to a different subdirectory. Fixed properly rather than
+worked around: added an optional `feature_key` parameter (default = the existing `FEATURE_KEY`,
+so every one of this function's other callers — Stages 11-21, the whole ablation campaign — is
+completely unaffected) to `load_hospital_features`/`load_pooled_features`, and threaded it
+through `app/inference.py`'s `calibrate_deferral_threshold`/`build_ood_detectors` and
+`app/streamlit_app.py`'s loaders. This avoided re-running the ~16-minute build with 5x the cost
+just to match an unrelated function's hardcoded assumption.
+
+**Verified, real values, not just "didn't crash":**
+- Deferral threshold calibrated from round 9's own val set: `0.6898` (compare to the frozen-
+  backbone default checkpoint's own separately-calibrated value — different models, different
+  thresholds, as expected).
+- Per-hospital OOD thresholds computed from round 9's own train/val features: A=-0.0222,
+  B=-0.0060, C=-0.0080 (real IsolationForest calibration, not placeholder values).
+- Full pipeline re-run on `sample.jpeg`/`sample2.jpg`: both now get real deferral/OOD decisions
+  (`sample.jpeg` → Uncertain, entropy 0.685; `sample2.jpg` → Pneumonia, not OOD-flagged by round
+  9's own detectors — a different verdict than the frozen-backbone detectors gave it, which is
+  expected: round 9's backbone represents images differently, so its own detectors should be
+  calibrated to its own feature space, not reuse someone else's).
+- `app/streamlit_app.py`'s "Advanced technical details" panel's hardcoded "unavailable for this
+  checkpoint" message is gone — it now only appears if calibration genuinely fails for *any*
+  checkpoint (a generic fallback, not a round-9-specific carve-out).
+- Full suite: 207/207 passing.
+
+## 20. Code changes (summary — full detail in section 4)
 
 - `src/models/densenet_head.py`: added `fine_tune_last_block: bool = False` to
   `DenseNet121Head`. Default-off, fully backward compatible with every existing
@@ -1057,5 +1102,17 @@ passing against the updated weights.
 - `scripts/build_xray_gate.py`: expanded `REAL_PHOTO_PATHS`/`HELD_OUT_NAMES`
   to 66/12 across 6 categories (section 18).
 - `src/uncertainty/xray_gate_weights.json`: regenerated (same format).
+- `scripts/build_feature_cache_finetuned.py` (new): builds round 9's own
+  pooled-feature cache (section 19).
+- `src/training/trainer.py`: `load_hospital_features`/`load_pooled_features`
+  gained an optional `feature_key` parameter, default-backward-compatible
+  with every existing caller (section 19).
+- `app/inference.py`: `calibrate_deferral_threshold`/`build_ood_detectors`
+  gained and thread through `feature_key` (section 19).
+- `app/streamlit_app.py`: `_feature_key_for` selects round 9's key; the
+  hardcoded "deferral/OOD unavailable for this checkpoint" carve-out is
+  removed (section 19).
+- `data/feature_cache_finetuned/` (new, gitignored like Stage 9's own
+  cache): round 9's real pooled-feature cache.
 - No existing checkpoint or documented research result (Stage 21 ablation table,
   centralized pilot) was modified or deleted.
