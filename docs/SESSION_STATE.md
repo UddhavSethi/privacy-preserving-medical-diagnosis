@@ -1407,6 +1407,17 @@ next (Phase 6's optional extensions, further campaign work, etc.) without asking
 
 ## 11. Exact next recommended step
 
+**Superseded — see §14 for the current frontier (2026-09-02).** Everything below
+this point in §11 describes Stage 21-23's completion state, which is now old news
+(OPT-1 through OPT-6 and the full ADR-1 GroupNorm-fallback body of work all
+happened since). Kept for historical continuity, not as the current next step.
+As of §14: **there is no single "next recommended step" — the ADR-1 fine-tuning
+scaling decision is explicitly parked pending owner input, and the two
+identified remaining gaps (multi-seed re-run, full-system row) are deliberately
+deferred, not next-in-line.** A resuming session should read §14 first, then
+`docs/adr1_groupnorm_fallback.md` for full detail, before assuming anything
+below here is still current.
+
 **Stage 21 is complete — the full ablation campaign, 27/27 real live runs,
 every row of the table with real numbers over 3 seeds.** This is the
 paper's core deliverable, done. See §7's Stage 21 note for the complete
@@ -1468,6 +1479,16 @@ above needs an explicit answer, and anything beyond Stage 23 (Phase 6's
 optional extensions OPT-1 through OPT-6, further campaign work, a push to
 `origin` if one hasn't happened yet, etc.) needs a fresh check-in with the
 owner, per this file's own repeated note in §10 and §7's Stage 21 entry.
+
+**Update, much later (2026-09-02):** OPT-1 through OPT-6 are long since
+committed and pushed, and the entire §14 ADR-1 GroupNorm-fallback body of
+work (11 items, see below) has also been committed and explicitly pushed to
+`origin/main` on direct owner request ("push it"). Working tree is clean.
+`git log --oneline -1` on `main` should show a commit refreshing
+`docs/PneumoFL_Project_Report.pdf` with §14's content as the most recent
+commit if nothing has happened since. Do not assume anything past that point
+is still pending — check `git log`/`git status` fresh rather than trusting
+older notes in this section about what's committed.
 
 **Update, later same session:** the CLAUDE.md proposal above WAS answered
 ("go ahead") and applied (two small commits, `028b2ac` + `2d09223` — status
@@ -1755,3 +1776,127 @@ deploy it" — a distinct, later step). CLAUDE.md itself has not been
 touched. Not yet committed/pushed — held for the owner's local review
 first, matching the explicit instruction to show it locally before any
 further step.
+
+**Update, later session:** OPT-6 was committed and pushed. The "then we
+deploy it" step this note flagged as not-yet-done is exactly what §14
+below covers, arriving as a completely separate follow-on session
+(ADR-1's own GroupNorm fallback work, triggered by a real live bug
+report, not a planned continuation of OPT-6).
+
+## 14. ADR-1 GroupNorm fallback: pilot through pre-deployment hardening (2026-08-31 to 2026-09-02)
+
+**Read `docs/adr1_groupnorm_fallback.md` for full detail — this section is a pointer/
+summary, not a restatement.** That document is the real running record (20 sections as
+of this writing), with every measured number, every failed approach tried before the
+one that worked, and the exact reasoning behind every decision. What follows here is
+the shape of what happened, for a resuming session to orient quickly before diving into
+the full doc.
+
+**How this started:** live use of the OPT-6 Streamlit app (§13) surfaced a real bug — a
+genuine pneumonia X-ray returned "Normal, high confidence." Debugging that traced to
+ADR-1's own named, pre-approved fallback (freeze-the-backbone caps Grad-CAM localization
+quality) and, with owner approval, the fallback was implemented and piloted
+(`fine_tune_last_block` on `DenseNet121Head`, default off, every existing checkpoint
+unaffected). One session's work turned into several; the headline results in order:
+
+1. **Centralized pilot** (single config, 8 epochs, not converged): AUROC 0.9051 → 0.9256,
+   Grad-CAM pointing-game accuracy roughly doubled (23.1% → 37.5%) when correct, recovered
+   from 13.6% → 35.2% on cases still misclassified. The Grad-CAM gain, not the AUROC gain,
+   is the decisive result — it directly confirms the causal story (frozen pooled features
+   can't localize spatially).
+2. **Federated pilot** (real FedAvg, 10 rounds, natural partition, seed 42) — survived a
+   laptop battery dying mid-scoring-run (no training lost, checkpoints were backed up) and
+   three separate real Flower/Ray infrastructure bugs along the way (stale SuperLink
+   daemon state, a harness/background-task interaction killing runs, a GPU-actor-reuse hang
+   inside Flower's simulation engine — see the ADR doc §6 for the full mechanism of each).
+   **Round 9 selected as best** by pooled val AUROC (0.8507); pooled test AUROC 0.856 vs.
+   the existing frozen-backbone FedAvg baseline's 0.818.
+3. **Deployed** as a selectable, non-default checkpoint in the app (`conf/app.yaml`'s
+   `fedavg_finetune_pilot` entry) — found and fixed a real checkpoint-format bug in the
+   loader along the way (round 9's checkpoint uses a different, prefixed state-dict format
+   than every other checkpoint in the project; would have hard-crashed on first use, not
+   silently misbehaved).
+4. **Full clinical error analysis** (confusion matrix, precision/recall/specificity/F1, not
+   just AUROC — owner-directed, "for a medical classifier I wouldn't just accept 78% and
+   move on"): the accuracy number was hiding a real problem — **24% of real pneumonia cases
+   missed** at a naive 0.5 threshold.
+5. **Threshold sweep + calibration + a real "Uncertain" abstention state** — val-set-only,
+   never touching test. Round 9's recommended threshold: 0.45 (Youden's-J), sensitivity
+   0.747→0.825 at a real specificity cost. Temperature scaling: T=0.935 — a genuine, honestly-
+   reported surprise (sharpens, doesn't soften; the "100%" complaint traced to a display-
+   rounding bug, not miscalibration, fixed separately). Abstention band (±0.05) lands at
+   ~10% val abstention, matching the project's own existing DG-10 convention.
+6. **RSNA label-composition finding**: quantified DG-2's already-known "abnormal-but-not-
+   pneumonia = Normal" caveat against real predictions — false-positive rate 3.1% on
+   genuinely normal images vs. **45.9%** on the ambiguous "No Lung Opacity / Not Normal"
+   subgroup. A zero-cost diagnostic (re-scoring existing predictions, no retraining) then
+   showed round 9 already sits at 0.970 AUROC / 97% specificity when that ambiguous
+   subgroup is excluded from evaluation — the accuracy ceiling is inherent label ambiguity,
+   not a fixable model weakness. **Recommendation: do not filter-and-retrain** — it's a
+   project-wide DG-2 decision (not round 9's alone), the real cost is a full 27-run
+   ablation re-run (not a quick retrain), and the quantified-limitation framing is the
+   stronger paper result anyway. Also evaluated and rejected on the evidence: 10 or 100 more
+   federated rounds on the same data — the val-AUROC curve had already flattened by round
+   8-10 (0.849→0.851→0.848), and more rounds without a learning-rate schedule or drift
+   correction risks overfitting/client-drift, not further gains.
+7. **A real chest-X-ray input gate** — owner asked for X-rays to be allowed in any form but
+   other images actually rejected. Two approaches tried and rejected on real held-out
+   evidence before one that worked: mean color saturation (a real X-ray and a non-X-ray
+   logo image were indistinguishable), then a classifier trained only on synthetic non-
+   X-ray surrogates (perfect on synthetic held-out data, but misclassified real held-out
+   photos as X-rays). What worked: the same classifier with 35 (later expanded to 66) real,
+   locally-available photos mixed into the negative class — validated on photos held out
+   entirely from training, all correctly rejected. Only the fitted model's ~1,025 weights
+   are committed, never the source photos (copyright; not portable to another machine
+   regardless).
+8. **Pre-deployment hardening pass** (owner-directed priority list, after asking "is this
+   ready for deployment"): (a) extended the threshold/calibration/abstention work to the
+   app's actual *default* checkpoint (`fedavg_no_dp`, not just round 9) — a different,
+   genuinely-overconfident calibration result this time (T=1.14, softening, ECE improved
+   ~46%); (b) re-enabled deferral/OOD detection for round 9 by building it its own pooled-
+   feature cache from its actual backbone (found and properly fixed a real hardcoded-cache-
+   key bug in `src/training/trainer.py` along the way, via an additive/backward-compatible
+   parameter, rather than an expensive full rebuild); (c) expanded the X-ray gate's negative
+   set for real category diversity (12 held-out photos across 6 categories, up from 6 across
+   1).
+9. **Two bugs found in the fixes themselves, corrected honestly rather than left standing**:
+   the OOD-display fix (leading caution note instead of a trailing one, "Cannot analyze"
+   state) was initially too aggressive and hard-blocked a real X-ray from a different source
+   — reverted to always showing the result, with the caution note still leading. MC Dropout's
+   stochastic passes were unseeded, so the same uploaded image gave a different confidence
+   every time — fixed by seeding from the image's own content hash.
+10. **A process-hygiene mistake, self-caught**: `git stash` (no path scope) was used mid-
+    session to isolate a failing test and briefly reverted every uncommitted change in the
+    repo, not just the files being tested. Caught immediately, reversed with `git stash pop`
+    in the same turn, verified nothing was lost.
+11. **The integration-smoke-test flakiness hit repeatedly this session was misdiagnosed at
+    first**, then corrected: not primarily Flower's SuperLink daemon lifecycle (a real gap,
+    fixed too, but not the actual cause), but `pyproject.toml`'s `[tool.flwr.app.components]`
+    left pointed at the fine-tuning app by the battery-death crash (item 2) — and that broken
+    state had already been committed. Reverted; a clean run now takes 36s instead of timing
+    out at 180s.
+
+**Current state:** all of the above is committed to `main` and pushed to `origin` (see §10
+below for the exact commit range). Full test suite: 207/207 passing. The Streamlit app has
+been run live and tested end-to-end in a real browser (not just headlessly), including
+switching between checkpoints and uploading real X-rays. `docs/PneumoFL_Project_Report.pdf`
+(both the repo copy and the owner's `~/Downloads` copy) has been regenerated to cover all of
+this.
+
+**Explicitly still open / deliberately not done, per the owner's own calls, not oversight:**
+- **Whether/how far to scale the ADR-1 fine-tuning result** (CLAUDE.md's own pending
+  decision) — explicitly left **undecided** mid-session ("keep it as undecided for now").
+  Do not resolve this without asking.
+- **Multi-seed re-run** (3 seeds, a scoped subset of the ablation ladder) and **the "full
+  system" row** (FedAvg+SecAgg+DP+TLS combined, deferred since Stage 17) — both raised and
+  explicitly deferred as part of the pre-deployment priority list (~25-30+ GPU-hours and
+  real architectural work respectively). Not reopened without a fresh ask.
+- The separate Docker federated-deployment demo (TLS/SecAgg/FedAvg containers, Stage 17) was
+  not touched or re-verified this session — nothing in this session's work runs through it.
+- Deferral/OOD are now real for round 9 (item 8b above) but still use a *separate* feature
+  cache (`data/feature_cache_finetuned/`, gitignored like Stage 9's own) built specifically
+  for its backbone — a resuming session extending this pattern to any future fine-tuned
+  checkpoint needs its own cache built the same way, not a reuse of round 9's.
+- **`tests/conftest.py` now exists** (added this session, `kill_process_tree` +
+  `kill_local_simulation_daemon`, shared with `test_tls_auth.py`) — §9 above's older note
+  that none was needed is superseded; don't re-derive that audit from scratch.
