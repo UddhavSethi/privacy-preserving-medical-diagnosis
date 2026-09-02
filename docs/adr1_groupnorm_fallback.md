@@ -8,9 +8,11 @@ specificity, F1) computed 2026-09-01 — 24% of real pneumonia cases missed on t
 see section 9; validation-only threshold sweep, probability calibration, and a
 new "Uncertain" abstention state implemented and wired in, 2026-09-01, see
 section 10; integration-smoke-test flakiness root-caused and fixed (it wasn't
-what section 10 assumed — see section 11), and RSNA's "Normal" label
+what section 10 assumed — see section 11), RSNA's "Normal" label
 composition quantified against real predictions (45.9% vs. 3.1% false-positive
-rate — section 12), 2026-09-02.** This document is the running record of a
+rate — section 12), a zero-cost filter-and-retrain diagnostic (section 13),
+and a real OOD-display bug fixed — a non-X-ray upload no longer gets a
+confident diagnosis (section 14), 2026-09-02.** This document is the running record of a
 debugging session that led to implementing ADR-1's own documented approved
 fallback. It is written to be turned into a PDF at the end of the session — every
 claim below is either a direct code change, a measured number from this machine, or
@@ -786,7 +788,34 @@ unambiguous-subset AUROC (0.970, isolating genuine model capability from label-s
 noise) — a more specific, more defensible result than either number alone, and one that costs
 nothing further to obtain.
 
-## 14. Code changes (summary — full detail in section 4)
+## 14. A non-X-ray upload still got a confident "Normal" diagnosis (2026-09-02)
+
+Owner tested the live app with a photo of Spider-Man — not a chest X-ray, not even a medical
+image. The app returned "Normal, 71%" (a different test) and separately a confident "Normal"
+result on an obviously non-medical photo, with no visible warning strong enough to register.
+
+**Investigated before assuming the OOD detector itself was broken.** Traced a real non-X-ray
+photo through the exact app pipeline (`app/inference.py`, unmodified): the per-hospital
+IsolationForest detectors correctly flagged it — all three hospitals' anomaly scores fired,
+`all()` (the §8/Part-B logic) correctly evaluated to "flag this." **The detector was never the
+bug.** The bug was display ordering: `app/streamlit_app.py` rendered the large "Normal 83%"
+headline and confidence meter *unconditionally*, then — only afterward — appended the OOD
+caution note as the very last item, literally below a "this prediction falls within the model's
+normal confidence range" reassurance that had already been shown for the same image. A user
+skimming the result sees a confident diagnosis with a footnote, not a warning.
+
+**Fix:** an OOD-flagged image no longer gets a Normal/Pneumonia headline or a confidence number
+at all — it shows **"Cannot analyze"** (reusing the abstention state's amber styling for visual
+consistency with the "Uncertain" treatment from section 10) with the caution message leading
+immediately, and the Grad-CAM section is skipped too (a heatmap "explaining" an arbitrary
+predicted class on a photo of Spider-Man would contradict the message directly above it).
+
+**Verified:** the same real non-X-ray photo, re-run through the actual component-rendering
+calls (`app/components.py::result_label`/`confidence_note`), confirms neither "Normal" nor
+"Pneumonia" appears anywhere in the output when OOD-flagged — the label is fully replaced, not
+just annotated. Full test suite re-run after the change: 205/205 passing, no regressions.
+
+## 15. Code changes (summary — full detail in section 4)
 
 - `src/models/densenet_head.py`: added `fine_tune_last_block: bool = False` to
   `DenseNet121Head`. Default-off, fully backward compatible with every existing
@@ -849,5 +878,8 @@ nothing further to obtain.
   subprocess lifecycle handling (section 11).
 - `outputs/results/round9_label_composition_analysis.json`: false-positive
   rate by RSNA's original detailed class (section 12).
+- `app/streamlit_app.py`: an OOD-flagged image now shows "Cannot analyze"
+  instead of a Normal/Pneumonia headline + confidence number, with the
+  caution note leading; Grad-CAM is skipped for flagged images (section 14).
 - No existing checkpoint or documented research result (Stage 21 ablation table,
   centralized pilot) was modified or deleted.
