@@ -12,7 +12,9 @@ what section 10 assumed — see section 11), RSNA's "Normal" label
 composition quantified against real predictions (45.9% vs. 3.1% false-positive
 rate — section 12), a zero-cost filter-and-retrain diagnostic (section 13),
 and a real OOD-display bug fixed — a non-X-ray upload no longer gets a
-confident diagnosis (section 14), 2026-09-02.** This document is the running record of a
+confident diagnosis (section 14); that fix was itself too aggressive and
+blocked a real X-ray, now reverted, plus a real MC-Dropout non-determinism
+bug fixed (section 15), 2026-09-02.** This document is the running record of a
 debugging session that led to implementing ADR-1's own documented approved
 fallback. It is written to be turned into a PDF at the end of the session — every
 claim below is either a direct code change, a measured number from this machine, or
@@ -815,7 +817,44 @@ calls (`app/components.py::result_label`/`confidence_note`), confirms neither "N
 "Pneumonia" appears anywhere in the output when OOD-flagged — the label is fully replaced, not
 just annotated. Full test suite re-run after the change: 205/205 passing, no regressions.
 
-## 15. Code changes (summary — full detail in section 4)
+## 15. Section 14's fix went too far: it also blocked a real X-ray; plus a real reproducibility bug (2026-09-02)
+
+Owner tested the live app twice more and reported two things: the same uploaded image gave a
+different confidence value on repeated analysis, and a file (`sample2.jpg`, a real chest X-ray
+downloaded from the web, confirmed by actually viewing it — a genuine frontal radiograph, not a
+photo) got no result at all.
+
+**Bug 1 — non-determinism.** `mc_dropout_predict`'s T=20 stochastic dropout passes were never
+seeded. Re-analyzing the identical uploaded file gave a different confidence (and could, in
+principle, flip the abstention/Uncertain decision) every single time — a real reproducibility
+problem for a tool whose whole framing depends on trustworthy, checkable output. **Fix:** seed
+`torch.manual_seed()` from a hash of the uploaded image's own bytes before the MC-Dropout call,
+in `app/inference.py::run_full_inference`. Verified directly: three runs of the same file now
+produce bit-identical confidence (0.701576, all three), while a different image still gets its
+own independent dropout sequence.
+
+**Bug 2 — section 14's fix was too aggressive.** Traced `sample2.jpg` through the pipeline: the
+per-hospital OOD detectors flagged it (`all()` = true) — the exact same signal a photo of
+Spider-Man produces — and section 14's hard block therefore suppressed it entirely, exactly the
+"doesn't analyse" complaint. **This is a real limitation of the underlying detector, not a
+one-off glitch**: it's calibrated on only two sources (Kermany, RSNA), and a genuine X-ray
+sourced any other way — different equipment, different export pipeline, a web download rather
+than the training pipeline's own preprocessing — can trip the same flag as something that isn't
+medical at all. The raw anomaly-score margins *did* differ between the two cases (Spider-Man/an
+anime wallpaper: scores 0.04–0.14 past threshold; `sample2.jpg`: −0.005 to −0.026, barely past
+it) — a real, measurable signal — but two anecdotal comparisons aren't enough evidence to
+calibrate a new "definitely not medical" cutoff responsibly, so no attempt was made to.
+
+**Fix: reverted the hard block.** The result is always shown again. What's kept from section
+14: the caution note now leads immediately, in front of the result, instead of trailing behind
+a "falls within normal confidence range" reassurance the way the pre-section-14 version did —
+addressing the original buried-warning problem without the new regression. Section 14's
+"Cannot analyze"/no-Grad-CAM behavior is fully removed.
+
+**Verified:** `sample2.jpg` now returns `Pneumonia, 70.2%` (still correctly flagged OOD, banner
+shown first) instead of being blocked. Full suite re-run: 205/205 passing.
+
+## 16. Code changes (summary — full detail in section 4)
 
 - `src/models/densenet_head.py`: added `fine_tune_last_block: bool = False` to
   `DenseNet121Head`. Default-off, fully backward compatible with every existing
@@ -881,5 +920,9 @@ just annotated. Full test suite re-run after the change: 205/205 passing, no reg
 - `app/streamlit_app.py`: an OOD-flagged image now shows "Cannot analyze"
   instead of a Normal/Pneumonia headline + confidence number, with the
   caution note leading; Grad-CAM is skipped for flagged images (section 14).
+- `app/inference.py`: `run_full_inference` now seeds MC-Dropout from the
+  uploaded image's own bytes — deterministic per image (section 15).
+- `app/streamlit_app.py`: reverted section 14's hard OOD block; the caution
+  note leads instead, the result is always shown (section 15).
 - No existing checkpoint or documented research result (Stage 21 ablation table,
   centralized pilot) was modified or deleted.
