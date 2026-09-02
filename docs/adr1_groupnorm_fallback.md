@@ -7,7 +7,10 @@ full clinical error-analysis breakdown (confusion matrix, precision, recall,
 specificity, F1) computed 2026-09-01 — 24% of real pneumonia cases missed on test,
 see section 9; validation-only threshold sweep, probability calibration, and a
 new "Uncertain" abstention state implemented and wired in, 2026-09-01, see
-section 10.** This document is the running record of a
+section 10; integration-smoke-test flakiness root-caused and fixed (it wasn't
+what section 10 assumed — see section 11), and RSNA's "Normal" label
+composition quantified against real predictions (45.9% vs. 3.1% false-positive
+rate — section 12), 2026-09-02.** This document is the running record of a
 debugging session that led to implementing ADR-1's own documented approved
 fallback. It is written to be turned into a PDF at the end of the session — every
 claim below is either a direct code change, a measured number from this machine, or
@@ -611,7 +614,121 @@ the new decision policy doesn't regress the earlier spot-check. Full project
 test suite re-run after these changes — no regressions. `AppTest` confirms the
 app still loads with zero exceptions.
 
-## 11. Code changes (summary — full detail in section 4)
+## 11. Correction: the integration-smoke-test flakiness had a different, simpler cause (2026-09-02)
+
+Section 8/9's own commentary (and `PneumoFL_Project_Report.pdf`'s Part C) attributed the
+`test_integration_smoke.py` failures observed this session to Flower's local-SuperLink daemon
+lifecycle — a real, genuine gap (confirmed below), but **not, on direct investigation, what
+actually caused those specific failures.** Recorded here so the record is accurate rather than
+just consistent with what was assumed at the time.
+
+**The real cause:** `pyproject.toml`'s `[tool.flwr.app.components]` was left pointed at the
+expensive raw-image fine-tuning app (`server_app_finetune`/`client_app_finetune`) instead of the
+canonical cached-feature app. `scripts/run_federated_finetune_pilot.py` swaps this temporarily
+and reverts it in a `finally` block — except the laptop battery death (section 10's own
+recovery story) killed that process before its `finally` block ever ran, leaving the swap in
+place. Worse: that broken state was already sitting in the working tree when section 8's commit
+was made, so it got **committed** — the canonical app's own config default was broken in
+`git` history for a time. The smoke test then silently ran the fine-tuning app (real raw-image
+forward/backward passes through a partially-unfrozen backbone, on CPU) instead of the cheap
+classifier-only pass on Stage 9's cached features it actually expects — comfortably exceeding
+its 180s timeout on every attempt.
+
+**Fix:** reverted `[tool.flwr.app.components]` to the canonical app. A clean run now takes 36s.
+
+**What was real and is still fixed, independently:** two genuine robustness gaps, found while
+chasing the misdiagnosis, neither of which actually caused the observed failures on their own:
+- `subprocess.run(..., timeout=...)` only kills the direct child process on timeout — `flwr run`'s
+  SuperLink and Ray cluster are grandchildren, not children, so a real timeout would have orphaned
+  them (reparented to init, alive indefinitely), matching what was manually observed and cleaned
+  up twice this session. Fixed: `Popen` + `start_new_session=True` + a process-group kill on
+  timeout, factored into `tests/conftest.py::kill_process_tree` and shared with Stage 16's
+  `test_tls_auth.py` (which already used this exact pattern).
+- That process-group kill still can't reach `flwr run`'s local-simulation SuperLink specifically
+  — verified directly: after a real timeout, `kill_process_tree` ran and `communicate()` returned,
+  but the SuperLink/Ray processes were still alive and still consuming CPU seconds later, because
+  Flower deliberately detaches this daemon into its own session (by design, so it survives the CLI
+  invocation that launched it, for reuse across local `flwr run` calls). Fixed: added
+  `kill_local_simulation_daemon()` (matches by process signature, not group membership) as an
+  explicit pre- and post-test cleanup.
+
+Full suite: 205/205 passing. Full detail and the exact honest account (including which
+explanation not to reuse) is in `tests/conftest.py`'s own module docstring.
+
+## 12. RSNA's "Normal" label groups two different things — quantified against round 9's real predictions (2026-09-02)
+
+Owner-directed follow-up, prompted by round 9's false-positive rate (section 9/10): is the
+accuracy ceiling partly a dataset-labeling artifact rather than purely a modeling/threshold
+one? CLAUDE.md's own Decision Gate DG-2 (resolved 2026-08-29) already named this risk in
+principle — RSNA's binary `Target` groups two clinically different findings into one negative
+class:
+
+| RSNA `class` | Meaning | Target | Patients |
+|---|---|---|---|
+| Normal | Genuinely normal chest X-ray | 0 | 8,851 |
+| No Lung Opacity / Not Normal | Some other real finding — just not pneumonia | 0 | 11,821 |
+| Lung Opacity | Pneumonia | 1 | 6,012 |
+
+DG-2 kept this grouping deliberately (preserves the full 20,672-patient negative class rather
+than shrinking Hospitals B/C by ~44%), with the caveat — "the model learns 'abnormal-but-not-
+pneumonia' = 'normal'" — flagged as an honest limitation to state, not engineer around. That
+caveat had never been measured against real model predictions until now.
+
+**Measured directly**, splitting round 9's real test-set predictions (decision threshold 0.45,
+section 10) by this *original* detailed class — information the model never sees at
+train/inference time, used here only for this diagnostic:
+
+| True subgroup (both labeled "Normal") | n | False-positive rate |
+|---|---|---|
+| Genuinely normal | 1,340 | **3.1%** (41 FP) |
+| "No Lung Opacity / Not Normal" | 1,761 | **45.9%** (808 FP) |
+
+The model is excellent on genuinely normal chest X-rays — 96.9% specificity, close to what a
+clean binary task would produce. Essentially all of the false-positive problem (808 of 869
+total pooled false positives reported in section 10 — RSNA alone accounts for nearly the
+entire figure) is concentrated in the ambiguous subgroup, where the model is barely better than
+chance at telling "some other abnormality" from "pneumonia." This is a coherent, expected
+result, not a surprising one: an X-ray with a real opacity-adjacent finding plausibly looks
+more like a pneumonia X-ray than a genuinely clean one does, to a model that was never given
+the information needed to tell them apart.
+
+**Full results:** `outputs/results/round9_label_composition_analysis.json`.
+
+### Does this mean the dataset should be filtered and the model retrained?
+
+**No — not recommended, for reasons of both governance and cost, not just inertia:**
+
+1. **This isn't round 9's decision to unwind — it's DG-2's, project-wide.** Every checkpoint in
+   the existing Stage 21 ablation campaign (all 27 runs, the paper's current source of truth)
+   was trained under this exact label grouping. Filtering it would invalidate the whole
+   campaign's comparability, not just round 9 — a change of that scope needs the same kind of
+   explicit approval DG-2 itself required, not a follow-on decision bundled into this session's
+   work.
+2. **The real cost is a full re-run, not a quick retrain.** Excluding "No Lung Opacity / Not
+   Normal" shrinks Hospitals B/C's negative class by 57% (11,821 of 20,672) — every partition
+   file, every cached CLAHE/feature artifact, and every one of the 27 ablation runs would need
+   regenerating and re-running to stay comparable. That's on the order of the original
+   multi-day campaign, not a bounded pilot.
+3. **The honest-limitation path is arguably the stronger result, not a fallback.** DG-2 already
+   committed to reporting this as a limitation rather than engineering around it. This session's
+   contribution is upgrading that from an asserted caveat to a *quantified* one (3.1% vs. 45.9%
+   FP rate) — a more specific, more credible claim for the paper than either silently filtering
+   the data or leaving the caveat unmeasured.
+4. **Priority order.** CLAUDE.md's own stated order (privacy → security → correctness →
+   reproducibility → academic credibility → explainability → uncertainty → maintainability →
+   raw accuracy) puts this squarely in "raw accuracy," last, and a full re-run competes directly
+   with GPU-hours this project has already flagged as scarce (§7's own estimate for a much
+   smaller 3-seed re-run was ~25-30 GPU-hours; this would cost more, not less, since it touches
+   every ablation row).
+
+**If a cheap, zero-retraining check of the ceiling is wanted** — how much of the specificity gap
+would close if this ambiguity simply didn't exist — that can be answered by re-scoring round 9's
+*existing* predictions with the ambiguous subgroup excluded from evaluation only (no new
+training, an afternoon-scale script, not a multi-day one). Not run here; offered as the
+low-cost next step if the question is "how much would this actually buy us," rather than
+committing to the full re-run.
+
+## 13. Code changes (summary — full detail in section 4)
 
 - `src/models/densenet_head.py`: added `fine_tune_last_block: bool = False` to
   `DenseNet121Head`. Default-off, fully backward compatible with every existing
@@ -666,5 +783,13 @@ app still loads with zero exceptions.
 - `outputs/results/round9_threshold_calibration_analysis.json`: full 17-point
   threshold sweep, calibration fit/measurement, and abstention-band sweep
   (section 10).
+- `pyproject.toml`: reverted `[tool.flwr.app.components]` to the canonical app
+  (section 11) — was accidentally committed pointed at the fine-tuning app.
+- `tests/conftest.py` (new): `kill_process_tree` (factored out of
+  `test_tls_auth.py`) and `kill_local_simulation_daemon` (section 11).
+- `tests/test_integration_smoke.py` / `tests/test_tls_auth.py`: hardened
+  subprocess lifecycle handling (section 11).
+- `outputs/results/round9_label_composition_analysis.json`: false-positive
+  rate by RSNA's original detailed class (section 12).
 - No existing checkpoint or documented research result (Stage 21 ablation table,
   centralized pilot) was modified or deleted.
