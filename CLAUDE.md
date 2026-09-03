@@ -593,8 +593,15 @@ touch them.
 
 ## 14. Current Implementation Status
 
-**As of 2026-08-30: Stages 0–23 complete (all of Phases 0–5). Phase 6 (OPT-1 through
-OPT-6) not started — optional, requires separate approval per §16.1.**
+**As of 2026-09-02: Stages 0–23 complete (all of Phases 0–5). Phase 6 (OPT-1 through
+OPT-6) complete — all six optional extensions implemented, verified, committed, and
+pushed. ADR-1's own GroupNorm fallback (§5, resolved decision 11) has since been
+piloted under both centralized and real federated training, deployed to the app as a
+selectable checkpoint, and followed by a pre-deployment hardening pass (threshold
+calibration for both checkpoints, a real chest-X-ray input gate, deferral/OOD
+re-enablement) — see resolved decisions 12–13 below and `docs/adr1_groupnorm_fallback.md`
+for the full record. Scaling the fine-tuned architecture into the paper's own results
+remains an open, explicitly undecided scope question — see Pending decisions.**
 
 | Item | Status |
 |---|---|
@@ -606,7 +613,7 @@ OPT-6) not started — optional, requires separate approval per §16.1.**
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
 | Code | All of Phases 0–5 (Stages 0–23) complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live; the full ablation campaign (Stage 21) ran 27/27 real live federated runs (3 seeds each) and produced the complete ablation table with real numbers for every row — local/centralized baselines, FedAvg (natural+balanced), FedAvg+SecAgg, FedAvg+DP (full epsilon sweep {1,2,4,8}, cleanly monotonic), and a supplementary Dirichlet synthetic non-IID sweep. Row 6 (full combined system) deliberately deferred — needs real integration work not yet done. Stage 22 audited the test suite against every CLAUDE.md §11.3 requirement (all already covered except the integration smoke test, now added) and added optional CI. Stage 23 produced the full documentation/reproducibility package (`README.md`, `docs/threat_model.md`, `docs/results.md`, `docs/reproducibility.md`, `docs/figures/`), including finding and fixing a real MLflow data-contamination bug in the integration smoke test. See `docs/SESSION_STATE.md` for current detail and the full table; this table is a coarse summary. |
 | Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`. |
-| Tests | 145 passing |
+| Tests | 207 passing |
 
 ### Resolved decisions
 
@@ -747,6 +754,48 @@ OPT-6) not started — optional, requires separate approval per §16.1.**
     on held-out data. Scaling this into a paper-credible, multi-seed result is
     an open scope decision, not yet started — see pending decisions below.
 
+12. **ADR-1 fine-tuning: federated pilot, deployment, and pre-deployment
+    hardening (2026-09-01 to 2026-09-02).** Extends resolved decision 11 from
+    a centralized-only pilot to a real 10-round FedAvg run (natural partition,
+    seed 42) — round 9 selected by pooled val AUROC (0.8507; pooled test 0.856
+    vs. the existing frozen-backbone FedAvg baseline's 0.818) — then deployed
+    as a selectable, non-default checkpoint in the Streamlit app. A full
+    clinical error breakdown (not just AUROC) found a real problem a single
+    accuracy number hid — 24% of real pneumonia cases missed at a naive 0.5
+    threshold — which motivated a validation-set-only threshold sweep,
+    probability calibration, and a genuine "Uncertain" abstention state,
+    applied to round 9 (threshold 0.45) and then extended to the app's actual
+    default checkpoint too (`fedavg_no_dp`, threshold 0.45, a different and
+    genuinely-overconfident calibration result). Separately built and
+    validated a real chest-X-ray input gate (two approaches tried and
+    rejected on real evidence — color saturation, then a classifier trained
+    only on synthetic non-X-ray surrogates — before one trained on real,
+    locally-available photos worked), and re-enabled deferral/OOD detection
+    for round 9 by building it its own pooled-feature cache from its actual
+    backbone. Full record, every measured number, and two bugs found in the
+    hardening work itself (an over-aggressive OOD block that was reverted,
+    an MC-Dropout non-determinism fix) are in
+    `docs/adr1_groupnorm_fallback.md` (20 sections) and `docs/SESSION_STATE.md`
+    §14. Tests: 207/207 passing throughout.
+
+13. **RSNA label-composition finding, and a decision not to filter-and-retrain
+    (resolved 2026-09-02, owner-approved).** Quantified DG-2's already-known
+    "abnormal-but-not-pneumonia = Normal" caveat against round 9's real
+    predictions rather than leaving it as an asserted limitation: false-positive
+    rate 3.1% on genuinely normal RSNA images vs. **45.9%** on the ambiguous
+    "No Lung Opacity / Not Normal" subgroup — nearly all of the pooled
+    false-positive count traces to this one subgroup. A zero-cost diagnostic
+    (re-scoring existing predictions with that subgroup excluded from
+    evaluation only, no retraining) then showed round 9 already reaches 0.970
+    AUROC / 97% specificity there — the accuracy ceiling is inherent label
+    ambiguity, not a fixable model weakness, and a filtered retrain would very
+    likely just reproduce a number already in hand for free. **Decision:
+    do not filter the dataset or retrain** — DG-2 is a project-wide decision
+    (not round 9's alone) that a full 27-run ablation re-run would be needed
+    to keep comparable, and the quantified-limitation framing (both numbers
+    reported) is judged the stronger result for the paper. Full detail in
+    `docs/adr1_groupnorm_fallback.md` §12–§13.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
 1. **Which regime (natural vs. balanced) is the paper's primary headline vs.
@@ -756,20 +805,28 @@ OPT-6) not started — optional, requires separate approval per §16.1.**
    across natural/balanced/Dirichlet has not itself been decided.
 2. **Whether/when a "full system" demonstration (FedAvg + SecAgg + DP + TLS,
    ablation row 6) gets built** — deferred, not resolved, when Stage 17 was
-   scoped (see item 8 below), and deferred again explicitly when Stage 21 was
-   scoped (item 10 below). Requires reconciling Stage 15's separate
-   legacy-API SecAgg app pair with Stage 13/14/16's canonical Message-API app.
-   Not yet raised for a decision on timing.
+   scoped (see item 8 below), deferred again explicitly when Stage 21 was
+   scoped (item 10 below), and raised and deferred a third time 2026-09-02 as
+   part of a pre-deployment gap list (real architectural work — reconciling
+   Stage 15's separate legacy-API SecAgg app pair with Stage 13/14/16's
+   canonical Message-API app — not a quick task). Still not raised for a
+   decision on timing.
 3. **Whether/how far to scale the ADR-1 GroupNorm fallback pilot (resolved
-   decision 11 above).** The pilot is single-seed, single-config (centralized),
-   8 epochs without convergence — real signal, not yet a credible result by
-   §11.2's own 3-seed standard. Three options on the table, undecided: (a)
-   make the fine-tuned checkpoint the app's default now while leaving the
-   paper's ablation table on the frozen-backbone architecture; (b) re-run a
-   scoped subset of the ablation ladder (e.g. rows 1–3, 3 seeds) under
+   decisions 11–12 above). Explicitly raised again 2026-09-02 and left
+   undecided at the owner's own direction ("keep it as undecided for now") —
+   do not resolve this without asking first.** The pilot now has real evidence
+   from both a centralized run (single-seed, 8 epochs, not converged) and a
+   real federated run (single-seed, 10 rounds) — real signal, still not a
+   credible result by §11.2's own 3-seed standard. Three options remain on the
+   table, still undecided: (a) make the fine-tuned checkpoint (round 9) the
+   app's default now while leaving the paper's ablation table on the
+   frozen-backbone architecture — round 9 is currently deployed as a
+   selectable, non-default option, not the default; (b) re-run a scoped
+   subset of the ablation ladder (e.g. rows 1–3, 3 seeds) under
    `fine_tune_last_block=True` for a paper-credible comparison without redoing
-   all 27 runs; (c) leave it as documented, verified future work. See
-   `docs/adr1_groupnorm_fallback.md` §6.
+   all 27 runs — estimated ~25-30 GPU-hours, also explicitly deferred
+   2026-09-02, not started; (c) leave it as documented, verified future work.
+   See `docs/adr1_groupnorm_fallback.md` §6-§7, §13.
 
 ---
 
@@ -780,16 +837,29 @@ To be stated honestly in the paper. Concealing these weakens credibility more th
 1. **Simulated hospitals, not a real deployment.** Clients are simulated processes/containers on
    one machine. No real cross-institutional network, governance or data-use agreements.
 2. **Frozen backbone caps accuracy** relative to full fine-tuning (ADR-1). Accepted trade-off.
-   A partial mitigation (ADR-1's own GroupNorm fallback) is now piloted and code-adopted —
-   see ADR-1 and `docs/adr1_groupnorm_fallback.md` — but not yet scaled into the paper's
-   results or the deployed app; this limitation still applies to both as they stand today.
+   A partial mitigation (ADR-1's own GroupNorm fallback) is now piloted under both
+   centralized and real federated training and deployed to the app as a selectable,
+   **non-default** checkpoint (round 9) — see ADR-1, resolved decisions 11–12, and
+   `docs/adr1_groupnorm_fallback.md`. Not yet scaled into the paper's own ablation
+   results, and not the app's default (deliberately, pending decision 3) — this
+   limitation still applies to the paper's headline results and to a first-time
+   visitor's default experience, even though the mitigation exists and works.
 3. **Effectively local DP**, which has worse utility than central DP at equal epsilon.
    Distributed DP is discussed but not implemented (ADR-2).
 4. **Malicious clients are out of scope.** No Byzantine or poisoning defense in this phase.
-5. **MC Dropout is a weak uncertainty estimator** and may be poorly calibrated; calibration
-   metrics are not in the approved baseline scope (§16.1).
-6. **Grad-CAM is evaluated qualitatively** unless the optional quantitative evaluation is
-   approved.
+5. **MC Dropout is a known-weak uncertainty estimator in the literature — now actually
+   measured, not just asserted (OPT-1, complete).** `docs/calibration.md`: ECE, Brier
+   score, reliability diagrams, and a risk-coverage curve computed on real predictions.
+   This session additionally fit and measured real per-checkpoint temperature-scaling
+   calibration for two checkpoints (`docs/adr1_groupnorm_fallback.md` §10, §17) — one
+   genuinely overconfident (softening helped, ECE improved ~46%), one already
+   reasonably well-calibrated (sharpening barely moved it) — confirming calibration
+   behavior is real and checkpoint-specific, not a fixed property to assume.
+6. **Grad-CAM quantitative evaluation is complete (OPT-3), not merely qualitative.**
+   `docs/gradcam_localization.md`: pointing-game/IoU against real RSNA bounding-box
+   annotations. Also directly informed ADR-1's own GroupNorm-fallback work — see ADR-1
+   and `docs/adr1_groupnorm_fallback.md` §2-§3 for the frozen-backbone localization
+   failure this metric first exposed.
 7. **Hardware ceiling.** 4 GB VRAM constrains input resolution, batch size, model capacity and
    the feasibility of ensemble-based methods; clients run sequentially in simulation.
 8. **Patient-level separation depends on identifier availability** in the chosen dataset
@@ -799,8 +869,10 @@ To be stated honestly in the paper. Concealing these weakens credibility more th
    empirically, zero id collisions across classes or the source's own train/test split, across
    all 5,856 files. Both sources therefore get full patient-level grouping in Stage 4; this
    limitation does not apply to this project's actual data.
-9. **Empirical privacy leakage is asserted from literature, not demonstrated**, unless the
-   optional privacy-attack study (§16.1) is approved.
+9. **Empirical privacy leakage is now demonstrated, not just asserted from literature
+   (OPT-2, complete).** `docs/privacy_attack.md`: a loss-based membership-inference
+   attack, run with DP off and at several epsilon values, measuring what the DP layer
+   actually mitigates rather than citing that it should.
 
 ---
 
@@ -826,12 +898,14 @@ must be raised, discussed and approved before any work begins.
   the deferral decision.
 - **Extended privacy/utility trade-off analysis** beyond the baseline epsilon sweep.
 
-### 16.1a Approved optional extensions (approved in concept 2026-08-29; implementation awaits a separate explicit go-ahead)
+### 16.1a Approved optional extensions (approved in concept 2026-08-29; both implemented and complete)
 
-Two extensions the owner raised, evaluated, and approved as concepts — **neither is part of
-the core 24-stage critical path**, both remain clearly optional, and neither is to be
-implemented until the owner separately approves the documentation diff that added them here.
-Full stage-style write-ups (goal, files, dependencies, prerequisites, testing, risks): `docs/IMPLEMENTATION_PLAN.md`, Phase 6, OPT-5 and OPT-6.
+Two extensions the owner raised, evaluated, and approved as concepts — **neither was part of
+the core 24-stage critical path**, and both remained optional right up until a separate
+explicit go-ahead was given. **Both are now implemented, verified, and committed** — the
+rationale below is kept as-is for context on why each was designed the way it was, not
+because either is still pending. Full stage-style write-ups (goal, files, dependencies,
+prerequisites, testing, risks): `docs/IMPLEMENTATION_PLAN.md`, Phase 6, OPT-5 and OPT-6.
 
 - **OPT-5 — Isolation Forest OOD detection gate.** Detects anomalous/out-of-distribution
   chest X-rays (wrong modality, corrupted scans, unfamiliar population) at inference time —
@@ -845,7 +919,12 @@ Full stage-style write-ups (goal, files, dependencies, prerequisites, testing, r
   that can be `FedAvg`'d; each hospital trains its own, consistent with data never leaving a
   hospital). No new dependency (`scikit-learn` is already pinned). Prerequisites: Stages 9
   and 11. Proposed placement: Phase 4, alongside Stage 18 (Grad-CAM) and Stage 19 (MC
-  Dropout).
+  Dropout). **Complete** — `src/uncertainty/ood_detector.py`, `docs/ood_detection.md`.
+  Its own real limitation, found live 2026-09-02 during ADR-1's app-deployment work: these
+  detectors answer "does this match a specific hospital's training distribution," not "is
+  this a chest X-ray at all" — a real X-ray from an unfamiliar source can trip the same flag
+  as a non-medical photo. Not safe to hard-block on alone; see the chest-X-ray input gate
+  below and `docs/adr1_groupnorm_fallback.md` §14-§16 for the full finding.
 - **OPT-6 — Streamlit demo interface.** A presentation-only layer over an already-trained
   checkpoint: prediction, MC Dropout confidence/deferral (Stage 19), Grad-CAM overlay (Stage
   18), and the OOD flag (OPT-5) if built. Does not touch training, evaluation, privacy
@@ -854,6 +933,15 @@ Full stage-style write-ups (goal, files, dependencies, prerequisites, testing, r
   extension's concept is not the same as approving that dependency addition. Prerequisites:
   Stages 11, 18, 19 (OPT-5 optional). Proposed placement: Phase 5, after Stage 21, in a new
   top-level `app/` directory (not `src/`, since it is an entry point, not library code).
+  **Complete and deployed locally** — `streamlit` added and approved, `app/` directory built
+  (`streamlit_app.py`, `inference.py`, `theme.py`, `components.py`, `results_loader.py`).
+  Since extended well beyond the original presentation-only scope by real live bug reports
+  (a genuine pneumonia X-ray misclassified) into the ADR-1 GroupNorm-fallback body of work:
+  validation-set-derived decision thresholds, real probability calibration, a genuine
+  "Uncertain" abstention state, and a real supervised chest-X-ray input gate (rejects
+  non-medical images before analysis runs) — all documented in
+  `docs/adr1_groupnorm_fallback.md` §8, §10, §14-§19. Not deployed publicly — local only,
+  matching the owner's own original "show me locally, then we discuss deployment" framing.
 
 ### 16.2 Explicit future work — do NOT implement unless explicitly approved
 
