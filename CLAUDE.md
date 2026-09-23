@@ -827,6 +827,15 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
    all 27 runs — estimated ~25-30 GPU-hours, also explicitly deferred
    2026-09-02, not started; (c) leave it as documented, verified future work.
    See `docs/adr1_groupnorm_fallback.md` §6-§7, §13.
+4. **DP + ADR-1 fine-tuning combination — not yet measured (raised
+   2026-09-22).** The 3-seed fine-tuning campaign and the DP epsilon sweep
+   have never been run together. Fine-tuning raises the trainable parameter
+   count from ~263K (head-only) to ~2.4M (classifier + denseblock4 + norm5)
+   — a 9.2x increase on exactly the axis ADR-1's DP-utility-collapse
+   rationale warns about. Scoped next step: single-seed, ε=4 (project
+   default), centralized only, with a VRAM smoke-test first since no DP
+   training in this project has used `BatchMemoryManager` yet and this
+   combination may need it. Not started.
 
 ---
 

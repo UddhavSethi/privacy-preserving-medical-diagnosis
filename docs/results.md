@@ -75,6 +75,40 @@ consistent curve with no reversals.
 
 ![Privacy-utility curve](figures/privacy_utility_curve.png)
 
+### DP sweep: full classification breakdown, not just AUROC
+
+AUROC alone hides *which* kind of error DP is actually introducing. The table
+above only ever logged AUROC to MLflow during the original Stage 21 campaign
+(`src/federated/server_app.py`'s `evaluate_fn` computes the full
+`compute_metrics()` breakdown every round but only reports the `auroc` field
+into `MetricRecord`). The rest was never discarded or lost — it just wasn't
+persisted — so this is recomputed directly from the saved ablation checkpoints
+(`outputs/checkpoints/ablation/dp_eps*.pt`) against the same pooled test set,
+same 3 seeds, at the project's stated default decision threshold (0.5, per
+`src/evaluation/metrics.py`'s documented threshold policy). Full per-seed
+numbers and confusion matrices: `outputs/results/dp_ablation_full_metrics.json`.
+
+| ε | AUROC | Accuracy | Sensitivity (Recall) | Specificity | F1 | Balanced Acc. |
+|---|---|---|---|---|---|---|
+| 1 | 0.7909 ± 0.0180 | 0.7463 ± 0.0124 | 0.4569 ± 0.0243 | 0.8766 ± 0.0078 | 0.5279 ± 0.0254 | 0.6668 ± 0.0156 |
+| 2 | 0.8021 ± 0.0149 | 0.7523 ± 0.0119 | 0.4698 ± 0.0198 | 0.8795 ± 0.0084 | 0.5408 ± 0.0224 | 0.6747 ± 0.0141 |
+| 4 (project default) | 0.8085 ± 0.0119 | 0.7542 ± 0.0105 | 0.4763 ± 0.0178 | 0.8793 ± 0.0073 | 0.5460 ± 0.0198 | 0.6778 ± 0.0125 |
+| 8 | 0.8133 ± 0.0097 | 0.7589 ± 0.0096 | 0.4896 ± 0.0154 | 0.8801 ± 0.0070 | 0.5576 ± 0.0176 | 0.6848 ± 0.0112 |
+
+**Sensitivity, not specificity, absorbs almost all of DP's cost.**
+Specificity stays nearly flat across the whole sweep (~0.88 throughout), but
+sensitivity ranges from 0.457 at ε=1 up to only 0.490 at ε=8 — meaning **even
+at the loosest tested privacy budget, DP-SGD causes the model to miss more
+than half of real pneumonia cases at the default threshold.** This is a
+materially more concerning picture for a clinical screening tool than the
+AUROC-only view above suggests, and mirrors the same recall-collapse pattern
+independently found for the (unrelated, non-DP) fine-tuned round-9 checkpoint
+in `docs/adr1_groupnorm_fallback.md` §9. No DP-specific threshold sweep has
+been run yet (unlike round 9's own §10) — a lower decision threshold would
+likely trade some specificity back for better sensitivity here too, but that
+is unverified for these checkpoints specifically and is future work, not a
+retracted claim.
+
 **Non-IID heterogeneity has a large, expected effect** — alpha = 0.1 (more
 skewed/non-IID) scores 0.7764 vs. alpha = 1.0 (closer to IID) at 0.8948, a much
 bigger swing than DP or SecAgg produce on their own. This is the standard,
@@ -116,6 +150,55 @@ consequence note) but is not directly measured in this table. Extending the
 overhead instrumentation to the legacy-API SecAgg path is future work, not a
 retracted claim — SecAgg's accuracy cost (row 4 above) is real, live-measured data;
 only its byte/wall-clock overhead specifically is not yet instrumented.
+
+## ADR-1 GroupNorm fine-tuning fallback: 3-seed comparison (2026-09-21)
+
+**Does not touch or invalidate the ablation table above.** The frozen-backbone
+architecture remains the paper's source of truth (CLAUDE.md's pending decision
+3 on whether/how far to scale this is still open and unresolved by this table
+alone). This section scales `fine_tune_last_block=True` (ADR-1's own approved
+fallback — see `docs/adr1_groupnorm_fallback.md`) from its original single-seed
+pilot to a proper 3-seed campaign (`{42, 123, 2024}`), covering rows 1-3 only
+(DP/SecAgg rows and the balanced regime are out of scope for this pass). Full
+per-seed detail and confusion matrices: `outputs/results/{centralized,local,
+federated}_finetune_multiseed.json`.
+
+| Row | Config | AUROC | Accuracy | Sensitivity | Specificity | F1 | Balanced Acc. |
+|---|---|---|---|---|---|---|---|
+| 1 | Local — Hospital A | 0.9927 ± 0.0002 | — | — | — | — | — |
+| 1 | Local — Hospital B | 0.8656 ± 0.0011 | — | — | — | — | — |
+| 1 | Local — Hospital C | 0.8786 ± 0.0021 | — | — | — | — | — |
+| 1 | Local (avg. of A/B/C) | ≈0.9123 | — | — | — | — | — |
+| 2 | Centralized (ceiling) | 0.9251 ± 0.0004 | **0.8566 ± 0.0026** | 0.7492 ± 0.0351 | 0.9050 ± 0.0195 | 0.7642 ± 0.0052 | 0.8271 ± 0.0078 |
+| 3 | FedAvg | 0.8651 ± 0.0101 | 0.7641 ± 0.0235 | 0.8542 ± 0.0680 | 0.7235 ± 0.0589 | 0.6922 ± 0.0162 | 0.7889 ± 0.0149 |
+
+Per-hospital sensitivity/specificity/F1 for row 1 were not computed in this
+pass (only pooled-comparable AUROC, matching `local_baseline.json`'s own
+format) — row 1's role here is the same as in the frozen-backbone table, a
+reference floor, not this section's main comparison point.
+
+**Reading this against the frozen-backbone table above:**
+- **Fine-tuning is a real, reproducible gain, not pilot noise.** Row 2 AUROC
+  0.9053 → 0.9251, row 3 (FedAvg) AUROC 0.8144 → 0.8651 — both move in the same
+  direction the original single-seed pilot showed, now confirmed over 3 seeds
+  with tight variance (row 2 std = 0.0004; row 3 std = 0.0101, still small
+  relative to the gain).
+- **The privacy-free centralized ceiling (row 2) clears 85% accuracy** —
+  0.8566 ± 0.0026. This is the number that answers "can this architecture hit
+  85%": yes, but only with no FL and no DP.
+- **The actual federated result (row 3) does not** — 0.7641 ± 0.0235 accuracy.
+  Federating still costs real accuracy even with the stronger backbone, same
+  qualitative story as the frozen-backbone table's own row 2 vs. row 3 gap.
+- **Sensitivity/specificity trade differently than the frozen-backbone
+  checkpoints.** Row 3 here is sensitivity-leaning (0.854 sensitivity vs. 0.724
+  specificity) — the opposite balance from round 9's single-seed federated
+  pilot (§9 of the ADR doc: 0.747 sensitivity / 0.789 specificity at the same
+  default 0.5 threshold). This reflects real seed-to-seed and run-to-run
+  variance in where the federated decision boundary lands, not a threshold
+  choice — no threshold tuning was applied to any row in this table.
+- **DP was not re-run under fine-tuning in this pass** — extending rows 4/5 to
+  this architecture is explicitly out of scope here and remains future work
+  (`docs/adr1_groupnorm_fallback.md` §7's option (b), only partially executed).
 
 ## Statistical rigor
 
