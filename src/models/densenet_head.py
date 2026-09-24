@@ -78,6 +78,18 @@ class DenseNet121Head(nn.Module):
             # returning zero issues -- see docs/adr1_groupnorm_fallback.md).
             self.features.denseblock4 = ModuleValidator.fix(self.features.denseblock4)
             self.features.norm5 = ModuleValidator.fix(self.features.norm5)
+            # Found running the DP+fine-tuning VRAM smoke test (2026-09-24, CLAUDE.md
+            # pending decision 4): torchvision's `_DenseLayer` hardcodes its two
+            # internal ReLUs `inplace=True`, which crashes Opacus's per-sample-gradient
+            # backward hooks the same way an in-place classifier ReLU would (see this
+            # class's own `classifier` comment above -- that fix never had to touch
+            # denseblock4 because it was always frozen and never run through Opacus
+            # before fine-tuning made it trainable). Purely a ReLU flag, not a
+            # parameter -- identical forward output either way, so this does not
+            # affect any existing non-DP checkpoint or training run.
+            for module in self.features.denseblock4.modules():
+                if isinstance(module, nn.ReLU):
+                    module.inplace = False
         else:
             freeze_module(self.features)
             freeze_batchnorm(self.features)
