@@ -827,15 +827,30 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
    all 27 runs — estimated ~25-30 GPU-hours, also explicitly deferred
    2026-09-02, not started; (c) leave it as documented, verified future work.
    See `docs/adr1_groupnorm_fallback.md` §6-§7, §13.
-4. **DP + ADR-1 fine-tuning combination — not yet measured (raised
-   2026-09-22).** The 3-seed fine-tuning campaign and the DP epsilon sweep
-   have never been run together. Fine-tuning raises the trainable parameter
-   count from ~263K (head-only) to ~2.4M (classifier + denseblock4 + norm5)
-   — a 9.2x increase on exactly the axis ADR-1's DP-utility-collapse
-   rationale warns about. Scoped next step: single-seed, ε=4 (project
-   default), centralized only, with a VRAM smoke-test first since no DP
-   training in this project has used `BatchMemoryManager` yet and this
-   combination may need it. Not started.
+4. **DP + ADR-1 fine-tuning combination — VRAM smoke test passed 2026-09-24;
+   the real experiment itself not yet run (raised 2026-09-22).** The 3-seed
+   fine-tuning campaign and the DP epsilon sweep have never been run
+   together. Fine-tuning raises the trainable parameter count from ~263K
+   (head-only) to ~2.4M (classifier + denseblock4 + norm5) — a 9.2x increase
+   on exactly the axis ADR-1's DP-utility-collapse rationale warns about.
+   `scripts/smoke_test_dp_finetune.py` (new) ran the scoped first step —
+   single-seed, ε=4/δ=1e-5 (project default), 5 real DP-SGD steps at
+   batch_size=16 (matching `train_centralized_finetune.py`'s own protocol) —
+   and found it fits easily: peak 441 MB of this machine's 4096 MB card, no
+   `BatchMemoryManager` needed. Along the way it found and fixed a real bug,
+   not just a config issue: the first time `denseblock4` was ever run through
+   Opacus, its internal per-sample-gradient hooks crashed on torchvision's
+   hardcoded `inplace=True` ReLUs inside `_DenseLayer` — the same class of
+   bug `DenseNet121Head`'s own classifier ReLU was already fixed for (Stage
+   8), just never triggered before since denseblock4 was always frozen.
+   Fixed in `DenseNet121Head.__init__` (`fine_tune_last_block=True` branch
+   only): forces every `nn.ReLU.inplace = False` inside denseblock4 — a flag,
+   not a parameter, so no existing checkpoint or non-DP run is affected
+   (verified: full test suite still 207/208 passing, the one failure an
+   unrelated subprocess-timeout flake in the canonical non-fine-tuned path).
+   **Not started**: the real single-seed ε=4 centralized DP+fine-tuning
+   experiment itself — the smoke test only confirms it will fit in VRAM, it
+   does not report a real accuracy/epsilon result.
 
 ---
 
