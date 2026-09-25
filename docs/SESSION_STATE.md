@@ -1960,18 +1960,60 @@ still explicitly parked, unaffected by this work).
    - **Scope, explicitly**: single seed, not a 3-seed campaign — CLAUDE.md section
      11.2's evidentiary bar is not claimed by this result alone.
 
-**Current state as of this writing**: items 1 and 2 above are committed and pushed.
-**Item 3 (`scripts/train_centralized_finetune_dp.py` and its outputs) is NOT yet
-committed** — sitting in the working tree, awaiting the owner's go-ahead. CLAUDE.md's
-pending decision 4 has also NOT yet been updated to record item 3's result — a
-proposed edit was drafted and shown, per CLAUDE.md's own governance rule, but not yet
-approved/applied as of this writing.
+**Current state as of 2026-09-25**: items 1 and 2 are committed and pushed. Item 3
+(`scripts/train_centralized_finetune_dp.py` and its `docs/results.md`/
+`docs/SESSION_STATE.md` writeup) is now committed (`f7b1891`, not yet pushed).
+CLAUDE.md's pending decision 4 has been updated (owner-approved) to record item 3's
+result.
+
+4. **Federated clean comparison (2026-09-25, owner-directed).** Item 3's own named
+   gap — comparing fine-tuned+DP+*centralized* against the existing head-only+DP+
+   *federated* sweep conflates architecture and topology — is now closed on the
+   federated side instead of the centralized side the assistant first proposed:
+   the owner pushed back that centralized is the ceiling, not the project's actual
+   thesis (FedAvg), so the fixed point for a clean isolation should be *federated*,
+   not centralized. New `src/federated/client_app_finetune_dp.py` (pairs with the
+   existing `server_app_finetune.py` unmodified) combines
+   `client_app_finetune.py`'s raw-image training loop with
+   `train_centralized_finetune_dp.py`'s Opacus-wrapping approach. Run via new
+   `scripts/run_federated_finetune_dp_pilot.py`: seed 42, 10 rounds, ε=4/δ=1e-5,
+   natural partition.
+   Along the way, `src/federated/server_app_finetune.py` was extended to compute
+   and persist the FULL metric breakdown per round (not just AUROC for the
+   best-selected round) — `_evaluate_saved_rounds` now returns
+   `pooled_test`/`pooled_val` full dicts per round, and `main()` writes a
+   `..._per_round_metrics.json` file before round checkpoints are cleaned up.
+   Backward-compatible (additive only); the already-committed no-DP 3-seed
+   campaign is unaffected.
+   The run itself was interrupted twice before finishing: once needing a restart
+   to pick up the per-round-metrics change (killed manually, no training had
+   started yet — only frozen-prefix setup), and once killed by Claude Code's own
+   low-memory protection mid-run (system pressure, not a code failure; the
+   `pyproject.toml` component swap was left un-reverted by the hard kill and had
+   to be manually restored before relaunching). Final successful run: ~7565s
+   (~2.1 hours).
+   **Real result**: AUROC 0.8302, accuracy 0.7482, sensitivity 0.2696,
+   specificity 0.9637 — vs. the existing head-only federated DP baseline (AUROC
+   0.8085±0.0119, sensitivity 0.4763±0.0178, specificity 0.8793±0.0073).
+   Fine-tuning improves AUROC under federated DP too, but sensitivity gets
+   dramatically worse (0.27 vs. 0.48) — the opposite trade from the centralized
+   DP result, and worse than either factor alone. Full per-round metrics (all
+   10 rounds, not just the best) confirm sensitivity was still rising at round
+   10, not plateaued. Full detail: `docs/results.md`'s "DP + fine-tuning:
+   federated clean comparison" section, `outputs/results/
+   federated_finetune_dp_singleseed.json`.
+   **Open, not yet decided**: this run used 10 rounds vs. the existing sweep's
+   20 — a second variable, not a perfectly clean isolation — and since
+   sensitivity hadn't plateaued, a 20-round re-run might tell a different
+   story. Not re-run yet; raised as an open question, not resolved.
 
 **Explicitly still open:**
-- Committing/pushing item 3's script + outputs, and updating CLAUDE.md's pending
-  decision 4 — both awaiting a fresh explicit go-ahead, not done automatically.
-- A clean "does fine-tuning help under DP" comparison (item 3's own caveat) — needs
-  new scope (a head-only centralized-DP baseline, or a federated fine-tuned-DP run)
-  that hasn't been raised for approval yet.
-- CLAUDE.md's pending decision 3 (whether/how far to scale fine-tuning into the paper)
-  remains explicitly parked at the owner's own direction, untouched by any of this.
+- Committing item 4's new files (`client_app_finetune_dp.py`,
+  `run_federated_finetune_dp_pilot.py`, the `server_app_finetune.py` extension,
+  the `docs/results.md`/`docs/SESSION_STATE.md` writeup) and pushing everything
+  — awaiting a fresh explicit go-ahead.
+- Whether to re-run item 4 at 20 rounds for round-count parity with the existing
+  DP sweep — raised, not decided.
+- CLAUDE.md's pending decision 3 (whether/how far to scale fine-tuning into the
+  paper) remains explicitly parked at the owner's own direction, untouched by
+  any of this.

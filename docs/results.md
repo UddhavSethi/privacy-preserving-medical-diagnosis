@@ -241,6 +241,66 @@ ADR-1's own DP-utility-collapse concern (9.2x trainable-parameter increase) did
 not manifest as a collapse — real, well-above-chance utility survived at
 exactly the target epsilon. It is a real cost, not a collapse.
 
+### DP + fine-tuning: federated clean comparison (2026-09-25)
+
+The single-seed centralized result above explicitly named its own gap: it
+compares fine-tuned+DP+**centralized** against the existing head-only+DP+
+**federated** sweep, conflating architecture and topology. This run closes
+that gap by holding topology fixed at **federated** — this project's actual
+thesis, not the centralized ceiling — so architecture (head-only vs.
+fine-tuned) is the only thing that differs from the existing DP sweep at the
+same epsilon.
+
+New `src/federated/client_app_finetune_dp.py` (ClientApp only; pairs with the
+existing `server_app_finetune.py` unmodified — FedAvg aggregation doesn't
+care how each client computed its gradients): combines
+`client_app_finetune.py`'s raw-image partially-unfrozen training loop with
+`train_centralized_finetune_dp.py`'s Opacus-wrapping approach (frozen prefix
+computed once outside Opacus on the deterministic eval-style view; only
+denseblock4+norm5+classifier wrapped by `PrivacyEngine`). Run via new
+`scripts/run_federated_finetune_dp_pilot.py`: single seed (42), 10 rounds
+(matches the existing no-DP federated fine-tuning pilot's own protocol),
+ε=4/δ=1e-5 (DG-7 project default), natural partition. Full detail, including
+every round's complete metric breakdown (not just AUROC — `server_app_
+finetune.py`'s `_evaluate_saved_rounds` now computes and persists the full
+set per round, not only for the best-selected round):
+`outputs/results/federated_finetune_dp_singleseed.json`.
+
+| Config | AUROC | Accuracy | Sensitivity | Specificity |
+|---|---|---|---|---|
+| Head-only + DP, ε=4, federated (existing sweep, 3-seed, 20 rounds) | 0.8085 ± 0.0119 | 0.7542 ± 0.0105 | 0.4763 ± 0.0178 | 0.8793 ± 0.0073 |
+| **Fine-tuned + DP, ε=4, federated (this run, single-seed, 10 rounds)** | **0.8302** | **0.7482** | **0.2696** | **0.9637** |
+
+**Fine-tuning improves AUROC under federated DP too (0.8085→0.8302), but at a
+severe sensitivity cost this time — the opposite of the centralized-DP
+result's own trade.** Sensitivity drops to 0.27, nearly half of the
+head-only federated baseline's already-DP-degraded 0.48, while specificity
+rises to 0.96. This is a materially worse clinical trade-off than either the
+head-only federated DP baseline or the fine-tuned centralized DP result
+(0.55 sensitivity) above — federating the fine-tuned+DP combination costs
+sensitivity far more than either factor does alone.
+
+**Per-round trajectory (all 10 rounds now fully stored, not just the best
+one): sensitivity was ≈0 through round 5 and only reached 0.27 by round 10,
+still rising when the run ended (val AUROC also still rising every round,
+never plateaued):**
+
+| Round | Test AUROC | Test Sensitivity | Test Specificity |
+|---|---|---|---|
+| 1 | 0.7021 | 0.0000 | 1.0000 |
+| 5 | 0.8024 | 0.0007 | 1.0000 |
+| 8 | 0.8262 | 0.1278 | 0.9847 |
+| 10 (selected) | 0.8302 | 0.2696 | 0.9637 |
+
+**Open caveat, not yet resolved — this is not a perfectly clean isolation
+either:** this run used 10 rounds; the existing head-only federated DP sweep
+it's compared against used 20. Round count is a second variable, and since
+sensitivity was still climbing (not plateaued) at round 10, a longer run
+might close some or all of the sensitivity gap — the 0.27 figure may be an
+undertrained snapshot rather than this configuration's real ceiling. Whether
+to re-run at 20 rounds for a fairer comparison is an open follow-up
+question, not yet decided.
+
 ## Statistical rigor
 
 Every row above is a mean ± std over 3 independent seeds, per `CLAUDE.md` §11.2 —
