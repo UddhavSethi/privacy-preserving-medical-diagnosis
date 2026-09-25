@@ -199,6 +199,47 @@ reference floor, not this section's main comparison point.
 - **DP was not re-run under fine-tuning in this pass** — extending rows 4/5 to
   this architecture is explicitly out of scope here and remains future work
   (`docs/adr1_groupnorm_fallback.md` §7's option (b), only partially executed).
+  **Update 2026-09-24: a single-seed first look now exists — see below.**
+
+### DP + fine-tuning: single-seed first look (2026-09-24)
+
+**Not a 3-seed campaign — a single measurement**, run after
+`scripts/smoke_test_dp_finetune.py` confirmed the fine-tuned tail
+(denseblock4+norm5+classifier, ~2.4M trainable params) fits comfortably in this
+machine's 4GB VRAM under Opacus (441MB peak, no `BatchMemoryManager` needed).
+That smoke test also found and fixed a real bug: torchvision's `denseblock4`
+hardcodes `inplace=True` internal ReLUs, which crash Opacus's per-sample-
+gradient hooks the same way the classifier's own ReLU once did (Stage 8) — fixed
+in `DenseNet121Head.__init__`, a flag flip that doesn't affect any existing
+checkpoint or non-DP run.
+
+`scripts/train_centralized_finetune_dp.py`: seed 42, centralized/pooled natural
+partition, epsilon=4/delta=1e-5 (project default). Full detail:
+`outputs/results/centralized_finetune_dp_singleseed.json`.
+
+| Config | AUROC | Accuracy | Sensitivity | Specificity | ε spent |
+|---|---|---|---|---|---|
+| Fine-tuned, no DP (ceiling, 3-seed, row 2 above) | 0.9251 ± 0.0004 | 0.8566 ± 0.0026 | 0.7492 ± 0.0351 | 0.9050 ± 0.0195 | — |
+| **Fine-tuned + DP, ε=4 (this run, single-seed)** | **0.8631** | **0.8063** | **0.5533** | **0.9203** | 3.990 |
+| Head-only + DP, ε=4, federated (existing sweep) | 0.8085 ± 0.0119 | 0.7542 ± 0.0105 | 0.4763 ± 0.0178 | 0.8793 ± 0.0073 | — |
+
+**Sensitivity absorbs almost all of DP's cost here too.** Against the fine-tuned
+no-DP ceiling, AUROC drops 0.9251→0.8631 but sensitivity drops much further,
+0.7492→0.5533 — the same "DP burns sensitivity, not specificity" pattern
+already documented for the head-only DP sweep above, now shown to hold for
+fine-tuning as well, and it erases most of fine-tuning's own sensitivity gain.
+
+**Every metric beats the existing head-only federated DP baseline — but this is
+not a clean isolation of "does fine-tuning help under DP."** That baseline is
+*federated* DP (ADR-2's own documented "effectively local DP," worse than
+central DP at equal epsilon); this run is *centralized*. Two variables changed
+at once, not one. A clean comparison needs either a head-only centralized-DP
+baseline or a federated fine-tuned-DP run — neither exists yet, and building
+either is new scope, not yet raised for approval.
+
+ADR-1's own DP-utility-collapse concern (9.2x trainable-parameter increase) did
+not manifest as a collapse — real, well-above-chance utility survived at
+exactly the target epsilon. It is a real cost, not a collapse.
 
 ## Statistical rigor
 

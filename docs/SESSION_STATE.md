@@ -1900,3 +1900,78 @@ this.
 - **`tests/conftest.py` now exists** (added this session, `kill_process_tree` +
   `kill_local_simulation_daemon`, shared with `test_tls_auth.py`) — §9 above's older note
   that none was needed is superseded; don't re-derive that audit from scratch.
+
+## 15. Fine-tuning multi-seed campaign, then DP + fine-tuning (2026-09-21 to 2026-09-24)
+
+**Supersedes §14's "still open" item on the multi-seed re-run** — that item is now
+partly done (rows 1-3, natural regime only; DP/SecAgg rows and the balanced regime
+remain out of scope, and CLAUDE.md's own scaling decision — pending decision 3 — is
+still explicitly parked, unaffected by this work).
+
+1. **3-seed fine-tuning campaign** (owner-approved scope: rows 1-3, natural regime,
+   `fine_tune_last_block=True`), scaling §14's single-seed pilots up to CLAUDE.md
+   section 11.2's own evidentiary bar. Real results, now in `docs/results.md`'s own
+   separated fine-tuning section: row 2 (centralized ceiling) AUROC 0.9251±0.0004,
+   **accuracy 0.8566±0.0026** (the only config that clears 85%); row 3 (FedAvg, the
+   actual project thesis) AUROC 0.8651±0.0101, accuracy 0.7641±0.0235; row 1 (local
+   per-hospital) 0.9927/0.8656/0.8786 AUROC for A/B/C. A real bug was found and fixed
+   along the way: `train_local_finetune.py`'s original checkpoint-save logic shared a
+   fixed filename with `train_centralized_finetune.py` and silently overwrote row 2's
+   three checkpoints (metrics were unaffected, saved to JSON first) — fixed with an
+   explicit `checkpoint_name` parameter, and row 2's checkpoints were re-run and
+   regenerated (2026-09-23) to confirm the fix, matching the original numbers exactly.
+   Committed `a0396f4`, pushed to origin.
+2. **DP + ADR-1 fine-tuning VRAM smoke test** (CLAUDE.md's pending decision 4, raised
+   2026-09-22): does DP-SGD fit in this machine's 4GB VRAM once fine-tuning raises the
+   trainable parameter count from ~263K (head-only, already production-proven) to
+   ~2.4M? New `scripts/smoke_test_dp_finetune.py` answered yes, easily — 441MB peak at
+   batch_size=16, no `BatchMemoryManager` needed. Found and fixed a real bug along the
+   way: the first time `denseblock4` was ever run through Opacus, its per-sample-
+   gradient hooks crashed on torchvision's hardcoded `inplace=True` internal ReLUs —
+   the same class of bug already fixed for the classifier's own ReLU (Stage 8), just
+   never triggered before since denseblock4 was always frozen. Fixed in
+   `DenseNet121Head.__init__` (`fine_tune_last_block=True` branch only): forces
+   `inplace=False` on denseblock4's ReLUs — a flag, not a parameter, so no existing
+   checkpoint or non-DP run is affected (verified: full suite 207/208 passing, the one
+   failure an unrelated subprocess-timeout flake in the canonical non-fine-tuned path,
+   confirmed by grep to never touch `fine_tune_last_block`). Committed `fe85f5c`,
+   pushed to origin.
+3. **The real single-seed DP+fine-tuning experiment** (what the smoke test unblocked):
+   new `scripts/train_centralized_finetune_dp.py`, seed 42, centralized/pooled natural
+   partition, epsilon=4/delta=1e-5 (project default). All 8 epochs completed (val AUROC
+   rose monotonically, early stopping never triggered). Real result: AUROC 0.8631,
+   accuracy 0.8063, sensitivity 0.5533, specificity 0.9203, epsilon_spent=3.990.
+   Reading it against what already existed:
+   - vs. the fine-tuned no-DP ceiling (item 1's row 2): AUROC 0.9251→0.8631, but
+     **sensitivity is the real story**: 0.7492→0.5533. Same "DP burns sensitivity, not
+     specificity" pattern `docs/results.md`'s DP-sweep breakdown already documented for
+     the head-only architecture, now shown to hold for fine-tuning too — and it erases
+     most of fine-tuning's own sensitivity gain.
+   - vs. the existing head-only **federated** DP baseline at epsilon=4 (`docs/
+     results.md` row 5: AUROC 0.8085±0.0119): every metric here is better, but **this
+     is not a clean isolation** — that baseline is federated (ADR-2's own documented
+     "effectively local DP," worse than central DP at equal epsilon), this run is
+     centralized. Two variables changed at once, not one. A clean comparison needs
+     either a head-only centralized-DP baseline or a federated fine-tuned-DP run,
+     neither of which exists yet.
+   - ADR-1's own DP-utility-collapse worry (9.2x parameter increase) did not manifest
+     as a collapse — real, well-above-chance utility survived at exactly the target
+     epsilon. It's a real cost, not a collapse.
+   - **Scope, explicitly**: single seed, not a 3-seed campaign — CLAUDE.md section
+     11.2's evidentiary bar is not claimed by this result alone.
+
+**Current state as of this writing**: items 1 and 2 above are committed and pushed.
+**Item 3 (`scripts/train_centralized_finetune_dp.py` and its outputs) is NOT yet
+committed** — sitting in the working tree, awaiting the owner's go-ahead. CLAUDE.md's
+pending decision 4 has also NOT yet been updated to record item 3's result — a
+proposed edit was drafted and shown, per CLAUDE.md's own governance rule, but not yet
+approved/applied as of this writing.
+
+**Explicitly still open:**
+- Committing/pushing item 3's script + outputs, and updating CLAUDE.md's pending
+  decision 4 — both awaiting a fresh explicit go-ahead, not done automatically.
+- A clean "does fine-tuning help under DP" comparison (item 3's own caveat) — needs
+  new scope (a head-only centralized-DP baseline, or a federated fine-tuned-DP run)
+  that hasn't been raised for approval yet.
+- CLAUDE.md's pending decision 3 (whether/how far to scale fine-tuning into the paper)
+  remains explicitly parked at the owner's own direction, untouched by any of this.
