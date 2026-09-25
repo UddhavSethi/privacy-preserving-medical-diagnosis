@@ -828,11 +828,13 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
    2026-09-02, not started; (c) leave it as documented, verified future work.
    See `docs/adr1_groupnorm_fallback.md` §6-§7, §13.
 4. **DP + ADR-1 fine-tuning combination — VRAM smoke test passed 2026-09-24;
-   the real experiment itself not yet run (raised 2026-09-22).** The 3-seed
-   fine-tuning campaign and the DP epsilon sweep have never been run
-   together. Fine-tuning raises the trainable parameter count from ~263K
-   (head-only) to ~2.4M (classifier + denseblock4 + norm5) — a 9.2x increase
-   on exactly the axis ADR-1's DP-utility-collapse rationale warns about.
+   single-seed real experiment run and committed 2026-09-24, still not a
+   3-seed campaign (raised 2026-09-22).** The 3-seed fine-tuning campaign and
+   the DP epsilon sweep have never been run together at the evidentiary bar
+   §11.2 requires. Fine-tuning raises the trainable parameter count from
+   ~263K (head-only) to ~2.4M (classifier + denseblock4 + norm5) — a 9.2x
+   increase on exactly the axis ADR-1's DP-utility-collapse rationale warns
+   about.
    `scripts/smoke_test_dp_finetune.py` (new) ran the scoped first step —
    single-seed, ε=4/δ=1e-5 (project default), 5 real DP-SGD steps at
    batch_size=16 (matching `train_centralized_finetune.py`'s own protocol) —
@@ -848,9 +850,27 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
    not a parameter, so no existing checkpoint or non-DP run is affected
    (verified: full test suite still 207/208 passing, the one failure an
    unrelated subprocess-timeout flake in the canonical non-fine-tuned path).
-   **Not started**: the real single-seed ε=4 centralized DP+fine-tuning
-   experiment itself — the smoke test only confirms it will fit in VRAM, it
-   does not report a real accuracy/epsilon result.
+   `scripts/train_centralized_finetune_dp.py` (new) then ran the real
+   experiment the smoke test unblocked: single seed (42), centralized/pooled
+   natural partition, ε=4/δ=1e-5 (DG-7's project default). Result: AUROC
+   0.8631, accuracy 0.8063, sensitivity 0.5533, specificity 0.9203,
+   ε_spent=3.990. Against the fine-tuned no-DP ceiling (AUROC 0.9251,
+   sensitivity 0.7492), DP again burns sensitivity far more than
+   specificity — the same pattern already documented for the head-only DP
+   sweep, now shown to hold under fine-tuning too, eroding most of
+   fine-tuning's own sensitivity gain. Beats the existing head-only
+   *federated* DP baseline (AUROC 0.8085±0.0119) on every metric, but this
+   is **not a clean isolation** of "does fine-tuning help under DP": that
+   baseline is federated (ADR-2's own documented "effectively local DP",
+   worse than central DP at equal epsilon), this run is centralized — two
+   variables change at once, not one. ADR-1's own DP-utility-collapse worry
+   did not manifest as a collapse: real, well-above-chance utility survived
+   at exactly the target epsilon. Full detail: `docs/results.md`'s "DP +
+   fine-tuning: single-seed first look" section and `docs/SESSION_STATE.md`
+   §15. **Not started**: scaling this to a 3-seed campaign (§11.2's own
+   evidentiary bar), and a clean fine-tuning-vs-DP isolation — needs either
+   a head-only centralized-DP baseline or a federated fine-tuned-DP run,
+   neither raised for approval yet.
 
 ---
 

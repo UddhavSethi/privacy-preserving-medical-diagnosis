@@ -57,6 +57,7 @@ from torch.utils.data import DataLoader
 from src.data.raw_image_dataset import RawImageDataset, records_for
 from src.data.transforms import build_eval_transform
 from src.evaluation.metrics import compute_metrics
+from src.evaluation.reporting import save_results
 from src.federated.serialization import array_record_to_classifier_state, classifier_state_to_array_record
 from src.federated.strategy import build_fedavg_strategy
 from src.models.densenet_head import DenseNet121Head
@@ -78,6 +79,26 @@ def _auroc(model: DenseNet121Head, loader: DataLoader, device: torch.device) -> 
             all_labels.extend(y.numpy().tolist())
     m = compute_metrics(np.array(all_labels), np.array(all_probs))
     return m.auroc if m.auroc == m.auroc else 0.0
+
+
+def _full_metrics(model: DenseNet121Head, loader: DataLoader, device: torch.device) -> dict:
+    """CLAUDE.md section 11.2's full metric set (AUROC, AUPRC, sensitivity,
+    specificity, F1, balanced accuracy, confusion matrix, ...), not just AUROC --
+    used per round (not only for the best-selected round) so a run's full
+    privacy/accuracy trajectory is a first-class measured output, not an
+    afterthought (same rationale Stage 20 already applied to wall-clock/payload)."""
+    model.eval()
+    all_probs, all_labels = [], []
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            probs = F.softmax(model(x), dim=1)[:, 1].cpu().numpy()
+            all_probs.extend(probs.tolist())
+            all_labels.extend(y.numpy().tolist())
+    metrics = compute_metrics(np.array(all_labels), np.array(all_probs)).to_dict()
+    tn, fp, fn, tp = np.array(metrics["confusion_matrix"]).ravel()
+    metrics["accuracy"] = float((tn + tp) / (tn + fp + fn + tp))
+    return metrics
 
 
 def _make_checkpoint_saving_evaluate_fn(round_checkpoints_dir: Path):
@@ -123,10 +144,18 @@ def _evaluate_saved_rounds(
             continue
         model = DenseNet121Head(fine_tune_last_block=True).to(device)
         model.load_trainable_state_dict({k: v.to(device) for k, v in torch.load(ckpt_path, map_location="cpu", weights_only=True).items()})
-        test_auroc = _auroc(model, test_loader, device)
-        val_auroc = _auroc(model, val_loader, device)
-        results[round_num] = {"pooled_test_auroc": test_auroc, "pooled_val_auroc": val_auroc}
-        print(f"round {round_num}: pooled_test_auroc={test_auroc:.4f} pooled_val_auroc={val_auroc:.4f}")
+        test_metrics = _full_metrics(model, test_loader, device)
+        val_metrics = _full_metrics(model, val_loader, device)
+        results[round_num] = {
+            "pooled_test_auroc": test_metrics["auroc"],
+            "pooled_val_auroc": val_metrics["auroc"],
+            "pooled_test": test_metrics,
+            "pooled_val": val_metrics,
+        }
+        print(
+            f"round {round_num}: pooled_test_auroc={test_metrics['auroc']:.4f} "
+            f"pooled_val_auroc={val_metrics['auroc']:.4f}"
+        )
 
     return results
 
@@ -209,10 +238,21 @@ def main(grid: Grid, context: Context) -> None:
 
         for round_num in per_round:
             marker = " <-- BEST (saved)" if round_num == best_round else ""
-            print(f"round {round_num}: {per_round[round_num]}{marker}")
+            print(f"round {round_num}: pooled_test={per_round[round_num]['pooled_test']}{marker}")
             if mlflow_uri:
-                mlflow.log_metric("pooled_test_auroc", per_round[round_num]["pooled_test_auroc"], step=round_num)
-                mlflow.log_metric("pooled_val_auroc", per_round[round_num]["pooled_val_auroc"], step=round_num)
+                for split in ("pooled_test", "pooled_val"):
+                    for key, value in per_round[round_num][split].items():
+                        if isinstance(value, (int, float)) and not isinstance(value, bool):
+                            mlflow.log_metric(f"{split}_{key}", value, step=round_num)
+
+        # Full per-round metric breakdown (not just AUROC) as its own artifact,
+        # not only in MLflow -- lets a downstream script (e.g. a single-seed
+        # diagnostic runner) load every round's complete metrics without a
+        # second pass over the checkpoints, which no longer exist after cleanup
+        # below.
+        per_round_path = out_path.parent / f"{out_path.stem}_per_round_metrics.json"
+        save_results({str(k): v for k, v in per_round.items()}, per_round_path)
+        print(f"Per-round metrics written: {per_round_path}")
 
         print(f"\nBest checkpoint: round {best_round}, pooled_val_auroc={best_val_auroc:.4f}")
         print(f"Saved to: {out_path}")
