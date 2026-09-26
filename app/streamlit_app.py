@@ -50,7 +50,15 @@ st.markdown(theme.CSS, unsafe_allow_html=True)
 
 CFG = OmegaConf.load(REPO_ROOT / "conf" / "app.yaml")
 HOSPITALS = ["A", "B", "C"]
-DEFAULT_CONFIG_KEY = "fedavg_no_dp"
+DEFAULT_CONFIG_KEY = "fedavg_finetune_pilot"
+# Changed 2026-09-26 (CLAUDE.md resolved decision 15, owner-approved) from
+# "fedavg_no_dp" to the fine-tuned FedAvg checkpoint (ADR-1's GroupNorm
+# fallback, now 3-seed-validated -- docs/results.md's row 3) -- real F1 gain
+# for a first-time visitor (0.660 -> 0.687). Deferral/OOD checks stay
+# unavailable for this checkpoint on this deployment either way (the
+# frozen-backbone feature cache they need wasn't bundled), so this doesn't
+# newly degrade anything relative to the previous default.
+#
 # Not DG-7's eps=4 default. DG-7 fixes the canonical epsilon for the *research*
 # ablation sweep (pyproject.toml's [tool.flwr.app.config] default for `flwr run`),
 # not what this demo UI shows by default. Debugged 2026-08-31 after a live pneumonia

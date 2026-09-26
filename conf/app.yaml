@@ -92,9 +92,9 @@ configurations:
     description: "NOT privacy-preserving. Pooled training, shown only as the upper-bound comparison point."
     privacy_preserving: false
   - key: fedavg_finetune_pilot
-    label: "FedAvg + fine-tuned last block (experimental — ADR-1 GroupNorm fallback, round 9)"
+    label: "FedAvg + fine-tuned last block (ADR-1 GroupNorm fallback — this app's default)"
     checkpoint: outputs/checkpoints/finetuned/fedavg_natural_seed42.pt
-    description: "Experimental pilot checkpoint (docs/adr1_groupnorm_fallback.md §6): denseblock4+norm5 unfrozen and fine-tuned under real FedAvg, 10 rounds, round 9 selected by pooled val AUROC. Higher AUROC than the default FedAvg checkpoint, but single-seed and not yet run under DP/SecAgg. Deferral and OOD checks are unavailable for this checkpoint (Stage 9's calibration cache assumes a frozen backbone, invalid here) — do not treat their absence as those checks passing."
+    description: "Now the app's default (CLAUDE.md resolved decision 15, 2026-09-26): denseblock4+norm5 unfrozen and fine-tuned under real FedAvg, 10 rounds, round 9 selected by pooled val AUROC. This is seed 42 of a real 3-seed campaign (docs/results.md's row 3, AUROC 0.8651±0.0101) -- no longer single-seed pilot evidence, though still not yet run under DP/SecAgg. Deferral and OOD checks are unavailable for this checkpoint (Stage 9's calibration cache assumes a frozen backbone, invalid here) — do not treat their absence as those checks passing."
     privacy_preserving: false
     fine_tune_last_block: true
     # Decision policy (docs/adr1_groupnorm_fallback.md §10, owner-directed
