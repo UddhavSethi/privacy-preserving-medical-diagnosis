@@ -852,6 +852,44 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
     demonstration that the combination is achievable, not a reportable row-6
     result yet.
 
+15. **ADR-1 GroupNorm fallback — the "whether/how far to scale" pending
+    decision fully resolved (2026-09-26): option (b) turned out to already be
+    done, option (a) resolved today.**
+
+    **A documentation-maintenance finding, not new training work:** option
+    (b) — "re-run ablation rows 1–3 at 3 seeds under `fine_tune_last_block=True`
+    for a paper-credible comparison" — was already completed on 2026-09-21
+    (checkpoints regenerated 2026-09-23), with real results already written
+    into `docs/results.md`'s "ADR-1 GroupNorm fine-tuning fallback: 3-seed
+    comparison" section (commit `a0396f4`). This pending-decision entry's own
+    text was simply never updated to say so, and stayed describing option (b)
+    as "not started" for three days after it was finished — caught only when
+    the owner asked to reopen this decision, expecting a fresh ~25-30
+    GPU-hour campaign was still needed. It wasn't. Real numbers (natural
+    regime, seeds {42, 123, 2024}): row 2 (centralized, privacy-free ceiling)
+    AUROC 0.9251±0.0004, accuracy 0.8566±0.0026; row 3 (FedAvg — the actual
+    project thesis configuration) AUROC 0.8651±0.0101, accuracy
+    0.7641±0.0235; row 1 (local, per-hospital) Hospital A 0.9927, B 0.8656,
+    C 0.8786 AUROC. This does **not** touch the paper's own headline ablation
+    table, which stays on the frozen-backbone architecture, deliberately kept
+    in a separate section of `docs/results.md`.
+
+    **Option (a) — owner-approved 2026-09-26**: the fine-tuned FedAvg
+    checkpoint (row 3's seed-42 run — the same weights as the original round-9
+    pilot, since seed 42 didn't need re-running for the 3-seed campaign) is
+    now the Streamlit app's **default** checkpoint
+    (`app/streamlit_app.py`'s `DEFAULT_CONFIG_KEY`, changed from
+    `fedavg_no_dp` to `fedavg_finetune_pilot`). Real improvement for a
+    first-time visitor: F1 0.660 → 0.687 (`docs/adr1_groupnorm_fallback.md`
+    §10/§17). Deferral/OOD checks remain unavailable for this checkpoint on
+    the public deployment specifically — the frozen-backbone feature cache
+    they'd need wasn't bundled into the repo (resolved decision 14's own
+    bundling scope, deliberately excluded for size) — the same limitation the
+    previous default already had there, not a new one.
+
+    **Option (c)** (leave as documented future work) is now moot — (a) and
+    (b) are both resolved.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
 1. **Which regime (natural vs. balanced) is the paper's primary headline vs.
@@ -866,27 +904,12 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
    10 below), and deferred a third time 2026-09-02 — is resolved: resolved
    decision 14 above shows the combination running live, both in simulation
    and over a real Docker/TLS deployment. What remains undecided is the same
-   shape of question as pending decision 3 below: whether/how far to invest
-   in turning a working single-run demonstration into a §11.2-credible
-   (3-seed) ablation-table row, versus leaving it as documented, verified
-   future work. Not raised for a decision on scope or timing yet.
-3. **Whether/how far to scale the ADR-1 GroupNorm fallback pilot (resolved
-   decisions 11–12 above). Explicitly raised again 2026-09-02 and left
-   undecided at the owner's own direction ("keep it as undecided for now") —
-   do not resolve this without asking first.** The pilot now has real evidence
-   from both a centralized run (single-seed, 8 epochs, not converged) and a
-   real federated run (single-seed, 10 rounds) — real signal, still not a
-   credible result by §11.2's own 3-seed standard. Three options remain on the
-   table, still undecided: (a) make the fine-tuned checkpoint (round 9) the
-   app's default now while leaving the paper's ablation table on the
-   frozen-backbone architecture — round 9 is currently deployed as a
-   selectable, non-default option, not the default; (b) re-run a scoped
-   subset of the ablation ladder (e.g. rows 1–3, 3 seeds) under
-   `fine_tune_last_block=True` for a paper-credible comparison without redoing
-   all 27 runs — estimated ~25-30 GPU-hours, also explicitly deferred
-   2026-09-02, not started; (c) leave it as documented, verified future work.
-   See `docs/adr1_groupnorm_fallback.md` §6-§7, §13.
-4. **DP + ADR-1 fine-tuning combination — VRAM smoke test passed 2026-09-24;
+   shape of question ADR-1's own fine-tuning fallback faced before resolved
+   decision 15 below settled it: whether/how far to invest in turning a
+   working single-run demonstration into a §11.2-credible (3-seed)
+   ablation-table row, versus leaving it as documented, verified future work.
+   Not raised for a decision on scope or timing yet.
+3. **DP + ADR-1 fine-tuning combination — VRAM smoke test passed 2026-09-24;
    single-seed real experiment run and committed 2026-09-24, still not a
    3-seed campaign (raised 2026-09-22).** The 3-seed fine-tuning campaign and
    the DP epsilon sweep have never been run together at the evidentiary bar
@@ -939,14 +962,13 @@ To be stated honestly in the paper. Concealing these weakens credibility more th
 
 1. **Simulated hospitals, not a real deployment.** Clients are simulated processes/containers on
    one machine. No real cross-institutional network, governance or data-use agreements.
-2. **Frozen backbone caps accuracy** relative to full fine-tuning (ADR-1). Accepted trade-off.
-   A partial mitigation (ADR-1's own GroupNorm fallback) is now piloted under both
-   centralized and real federated training and deployed to the app as a selectable,
-   **non-default** checkpoint (round 9) — see ADR-1, resolved decisions 11–12, and
-   `docs/adr1_groupnorm_fallback.md`. Not yet scaled into the paper's own ablation
-   results, and not the app's default (deliberately, pending decision 3) — this
-   limitation still applies to the paper's headline results and to a first-time
-   visitor's default experience, even though the mitigation exists and works.
+2. **Frozen backbone caps accuracy** relative to full fine-tuning (ADR-1). Accepted trade-off
+   for the paper's own headline results, which stay on the frozen-backbone architecture. A
+   partial mitigation (ADR-1's own GroupNorm fallback) has since been scaled to a 3-seed
+   comparison and is now the app's **default** checkpoint for a first-time visitor (resolved
+   decisions 11–12 and 15) — see `docs/adr1_groupnorm_fallback.md` and `docs/results.md`.
+   This limitation therefore still applies to the paper's reported ablation-table numbers,
+   just no longer to the live app's default experience.
 3. **Effectively local DP**, which has worse utility than central DP at equal epsilon.
    Distributed DP is discussed but not implemented (ADR-2).
 4. **Malicious clients are out of scope.** No Byzantine or poisoning defense in this phase.
