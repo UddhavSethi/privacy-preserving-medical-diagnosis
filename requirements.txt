@@ -1,0 +1,27 @@
+# Streamlit Community Cloud reads this file with plain pip (not uv), and runs
+# CPU-only hosts, so pyproject.toml's [tool.uv.sources] CUDA index pin for
+# torch/torchvision (pytorch-cu126) can't be reused here -- it's uv-specific
+# syntax pip doesn't understand, and would otherwise try to resolve a CUDA
+# build. Mirrors docker/Dockerfile.client's own proven CPU-only install
+# (Stage 17, DG-9), which hits the exact same problem for the same reason.
+# Versions match pyproject.toml/uv.lock exactly (ADR-5's pinning requirement)
+# except torch/torchvision, which are the CPU-wheel build of the same version.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0
+torchvision==0.28.0
+streamlit==1.62.0
+flwr==1.35.0
+opacus==1.6.0
+opencv-python-headless==5.0.0.93
+hydra-core==1.3.5
+omegaconf==2.3.1
+mlflow==3.15.2
+numpy==2.4.6
+pandas==2.3.3
+scikit-learn==1.9.0
+pydicom==3.0.2
+pillow==12.3.0
+tqdm==4.70.0
+matplotlib==3.11.1
+grad-cam==1.5.7
+requests==2.34.2
