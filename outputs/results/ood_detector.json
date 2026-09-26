@@ -1,0 +1,50 @@
+{
+  "A": {
+    "n_train": 4180,
+    "n_val": 841,
+    "n_test": 835,
+    "calibration": {
+      "threshold": -0.025973973836253217,
+      "target_flag_fraction": 0.05,
+      "realized_flag_fraction_on_calibration": 0.059453032104637336,
+      "n_calibration": 841
+    },
+    "test_flag_rate": 0.06467065868263473,
+    "synthetic_flag_rates": {
+      "random_noise": 1.0,
+      "structured_pattern": 1.0
+    }
+  },
+  "B": {
+    "n_train": 9330,
+    "n_val": 2034,
+    "n_test": 1978,
+    "calibration": {
+      "threshold": -0.02849859841145641,
+      "target_flag_fraction": 0.05,
+      "realized_flag_fraction_on_calibration": 0.05014749262536873,
+      "n_calibration": 2034
+    },
+    "test_flag_rate": 0.0455005055611729,
+    "synthetic_flag_rates": {
+      "random_noise": 1.0,
+      "structured_pattern": 1.0
+    }
+  },
+  "C": {
+    "n_train": 9348,
+    "n_val": 1969,
+    "n_test": 2025,
+    "calibration": {
+      "threshold": -0.03488481294511053,
+      "target_flag_fraction": 0.05,
+      "realized_flag_fraction_on_calibration": 0.04977145759268664,
+      "n_calibration": 1969
+    },
+    "test_flag_rate": 0.05234567901234568,
+    "synthetic_flag_rates": {
+      "random_noise": 1.0,
+      "structured_pattern": 1.0
+    }
+  }
+}
