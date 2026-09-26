@@ -611,7 +611,7 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
 | Git repository | Initialized, remote configured, active history on `main`, pushed to origin |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | All of Phases 0–5 (Stages 0–23) complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live; the full ablation campaign (Stage 21) ran 27/27 real live federated runs (3 seeds each) and produced the complete ablation table with real numbers for every row — local/centralized baselines, FedAvg (natural+balanced), FedAvg+SecAgg, FedAvg+DP (full epsilon sweep {1,2,4,8}, cleanly monotonic), and a supplementary Dirichlet synthetic non-IID sweep. Row 6 (full combined system) deliberately deferred — needs real integration work not yet done. Stage 22 audited the test suite against every CLAUDE.md §11.3 requirement (all already covered except the integration smoke test, now added) and added optional CI. Stage 23 produced the full documentation/reproducibility package (`README.md`, `docs/threat_model.md`, `docs/results.md`, `docs/reproducibility.md`, `docs/figures/`), including finding and fixing a real MLflow data-contamination bug in the integration smoke test. See `docs/SESSION_STATE.md` for current detail and the full table; this table is a coarse summary. |
+| Code | All of Phases 0–5 (Stages 0–23) complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live; the full ablation campaign (Stage 21) ran 27/27 real live federated runs (3 seeds each) and produced the complete ablation table with real numbers for every row — local/centralized baselines, FedAvg (natural+balanced), FedAvg+SecAgg, FedAvg+DP (full epsilon sweep {1,2,4,8}, cleanly monotonic), and a supplementary Dirichlet synthetic non-IID sweep. Row 6 (full combined system) demonstrated live 2026-09-26 (resolved decision 14) — a single exploratory run, not yet a multi-seed ablation-table entry. Stage 22 audited the test suite against every CLAUDE.md §11.3 requirement (all already covered except the integration smoke test, now added) and added optional CI. Stage 23 produced the full documentation/reproducibility package (`README.md`, `docs/threat_model.md`, `docs/results.md`, `docs/reproducibility.md`, `docs/figures/`), including finding and fixing a real MLflow data-contamination bug in the integration smoke test. See `docs/SESSION_STATE.md` for current detail and the full table; this table is a coarse summary. |
 | Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`. |
 | Tests | 207 passing |
 
@@ -796,6 +796,62 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
     reported) is judged the stronger result for the paper. Full detail in
     `docs/adr1_groupnorm_fallback.md` §12–§13.
 
+14. **Ablation row 6 ("full system": FedAvg + SecAgg+ + DP + TLS/client-auth) —
+    demonstrated for the first time (2026-09-26), exploratory single-run, not
+    yet a campaign.** Closes the architectural-feasibility half of pending
+    decision 2 below (the combination is achievable); whether/when to scale it
+    into a paper-credible multi-seed row remains open (see the rewritten
+    pending decision 2).
+
+    Implementation: added a `dp-enabled` branch to `client_app_secagg.py`'s
+    legacy `SecAggClient.fit()` (Stage 15's own legacy-API app pair), reusing
+    the exact same Opacus/accountant machinery as the canonical app's row-5
+    path (deterministic eval-view features, per-hospital cached
+    `PrivacyEngine` so the RDP accountant's epsilon accumulates across
+    rounds). `server_app_secagg.py`'s legacy `FedAvg` strategy gained a
+    `fit_metrics_aggregation_fn` to surface `epsilon_spent`/`noise_multiplier`
+    (previously unset, since row 4 had no such metrics). Also fixed a real
+    latent gap found in the process: `client_app_secagg.py` never had the
+    per-hospital `node_config` override `client_app.py` has — without it, the
+    Docker Compose deployment's per-hospital data isolation would have
+    silently fallen back to the pooled path instead of each hospital's own
+    shard.
+
+    Verified twice, live, not mocked:
+    - Simulation (`flwr run . --federation-config "num-supernodes=3"
+      --run-config "num-server-rounds=3 dp-enabled=true"`, after swapping
+      `pyproject.toml`'s components to this app pair): pooled_test_auroc
+      0.754 → 0.784 → 0.801 over 3 rounds, epsilon_spent=3.368 (target 4.0,
+      delta=1e-5), SecAgg+'s masking handshake completing every round.
+    - Real Docker Compose deployment (real TLS certs, real authenticated
+      SuperNodes, real per-hospital container filesystem isolation,
+      `scripts/generate_certs.sh` + `scripts/prepare_deployment_shards.py`
+      unchanged): 2 rounds completed in 151s, pooled_test_auroc rising from
+      loss 0.246→0.215 (≈0.75→≈0.79), epsilon_spent≈3.60. Clean teardown
+      confirmed (`docker ps -a` empty afterward).
+
+    Same swap-and-revert operational pattern as Stage 15 (row 4):
+    `pyproject.toml`'s `[tool.flwr.app.components]` must be temporarily
+    pointed at `server_app_secagg.py`/`client_app_secagg.py` to run this row,
+    then reverted — the repository's committed default stays on the
+    canonical app.
+
+    **Real finding during validation, not by inspection**: an initial
+    apparent "SecAgg+ no longer works at all, even row 4 — environment
+    regression" scare turned out to be a test-harness gap, not a regression —
+    manual `flwr run` invocations during this session omitted
+    `--federation-config "num-supernodes=3"`, which every one of the
+    project's own scripts (`run_ablation.py`, etc.) already passes every
+    time. Flower's simulation engine silently defaults to only 2 SuperNodes
+    (a documented default change since flwr 1.32) and waits forever for a
+    third that never spawns. No actual regression in Stage 15's own
+    already-documented row 4 path.
+
+    **Not yet done**: multi-seed (§11.2's own 3-seed standard), and not yet
+    folded into `docs/results.md`'s ablation table — this is a working
+    demonstration that the combination is achievable, not a reportable row-6
+    result yet.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
 1. **Which regime (natural vs. balanced) is the paper's primary headline vs.
@@ -803,14 +859,17 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
    and the Dirichlet synthetic sweep (3, Stage 21) are now resolved — see the
    resolved-decisions list below — but the paper's primary-vs-secondary framing
    across natural/balanced/Dirichlet has not itself been decided.
-2. **Whether/when a "full system" demonstration (FedAvg + SecAgg + DP + TLS,
-   ablation row 6) gets built** — deferred, not resolved, when Stage 17 was
-   scoped (see item 8 below), deferred again explicitly when Stage 21 was
-   scoped (item 10 below), and raised and deferred a third time 2026-09-02 as
-   part of a pre-deployment gap list (real architectural work — reconciling
-   Stage 15's separate legacy-API SecAgg app pair with Stage 13/14/16's
-   canonical Message-API app — not a quick task). Still not raised for a
-   decision on timing.
+2. **Whether/when to scale the now-demonstrated "full system" (ablation row 6:
+   FedAvg + SecAgg+ + DP + TLS/client-auth) into a paper-credible, multi-seed
+   ablation-table entry.** The architectural question — deferred when Stage 17
+   was scoped (item 8 below), deferred again when Stage 21 was scoped (item
+   10 below), and deferred a third time 2026-09-02 — is resolved: resolved
+   decision 14 above shows the combination running live, both in simulation
+   and over a real Docker/TLS deployment. What remains undecided is the same
+   shape of question as pending decision 3 below: whether/how far to invest
+   in turning a working single-run demonstration into a §11.2-credible
+   (3-seed) ablation-table row, versus leaving it as documented, verified
+   future work. Not raised for a decision on scope or timing yet.
 3. **Whether/how far to scale the ADR-1 GroupNorm fallback pilot (resolved
    decisions 11–12 above). Explicitly raised again 2026-09-02 and left
    undecided at the owner's own direction ("keep it as undecided for now") —

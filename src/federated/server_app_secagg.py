@@ -32,6 +32,16 @@ weights each client's update by `num_examples`, and the default is far below
 this project's real per-hospital counts (Hospital B/C's natural shards are
 ~13,342 train each), which silently triggered the workflow's own "potential
 overflow" warning in the weight-quantization math every round.
+
+Ablation row 6 extension (full system: FedAvg + SecAgg + DP + TLS/auth):
+`client_app_secagg.py`'s `SecAggClient.fit()` now has a `dp-enabled` branch
+that returns `epsilon_spent`/`noise_multiplier` in its fit metrics dict, same
+as `client_app.py`'s row-5 path. The legacy `Strategy` API's
+`fit_metrics_aggregation_fn` (unset by Stage 15, since row 4 had no such
+metrics) surfaces those here — a simple mean across the 3 hospitals'
+independently-accounted local-DP spend (ADR-2's own documented "effectively
+local DP": each client's epsilon is its own, not a single shared number, so a
+mean is a summary, not the precise per-hospital worst case).
 """
 from __future__ import annotations
 
@@ -76,18 +86,34 @@ def _make_legacy_evaluate_fn(partition_path: str, feature_cache_dir: str, refere
     return evaluate_fn
 
 
+def _fit_metrics_aggregation_fn(fit_metrics: list[tuple[int, dict]]) -> dict:
+    """Mean of each numeric metric across clients that returned it this round —
+    covers both the always-present overhead metrics (wall_clock_seconds,
+    payload_bytes, train_loss) and the DP-only ones (epsilon_spent,
+    noise_multiplier), which are simply absent from the list when dp-enabled
+    is false."""
+    keys = {"epsilon_spent", "noise_multiplier", "wall_clock_seconds", "payload_bytes", "train_loss"}
+    aggregated: dict = {}
+    for key in keys:
+        values = [metrics[key] for _, metrics in fit_metrics if key in metrics]
+        if values:
+            aggregated[key] = sum(values) / len(values)
+    return aggregated
+
+
 @app.main()
 def main(grid: Grid, context: Context) -> None:
     num_rounds = int(context.run_config["num-server-rounds"])
     num_shares = int(context.run_config["num-shares"])
     reconstruction_threshold = int(context.run_config["reconstruction-threshold"])
     seed = int(context.run_config["seed"])
+    dp_enabled = bool(context.run_config.get("dp-enabled", False))
 
     mlflow_uri = context.run_config.get("mlflow-tracking-uri")
     if mlflow_uri:
         mlflow.set_tracking_uri(str(mlflow_uri))
         mlflow.set_experiment(str(context.run_config.get("mlflow-experiment-name", "federated")))
-        run_cm = mlflow.start_run(run_name=f"secagg_seed{seed}")
+        run_cm = mlflow.start_run(run_name=f"secagg_seed{seed}" + ("_dp" if dp_enabled else ""))
     else:
         run_cm = nullcontext()
 
@@ -100,8 +126,17 @@ def main(grid: Grid, context: Context) -> None:
                     "reconstruction_threshold": reconstruction_threshold,
                     "seed": seed,
                     "secagg_enabled": True,
+                    "dp_enabled": dp_enabled,
                 }
             )
+            if dp_enabled:
+                mlflow.log_params(
+                    {
+                        "target_epsilon": context.run_config.get("target-epsilon"),
+                        "target_delta": context.run_config.get("target-delta"),
+                        "max_grad_norm": context.run_config.get("max-grad-norm"),
+                    }
+                )
 
         torch.manual_seed(seed)
         global_model = DenseNet121Head()
@@ -119,6 +154,7 @@ def main(grid: Grid, context: Context) -> None:
             evaluate_fn=_make_legacy_evaluate_fn(
                 context.run_config["partition-path"], context.run_config["feature-cache-dir"], reference_keys
             ),
+            fit_metrics_aggregation_fn=_fit_metrics_aggregation_fn,
         )
 
         legacy_context = LegacyContext(
@@ -135,8 +171,14 @@ def main(grid: Grid, context: Context) -> None:
         workflow = DefaultWorkflow(fit_workflow=fit_workflow)
         workflow(grid, legacy_context)
 
-        print("\n=== Run history (SecAgg+, ablation row 4) ===")
+        print(f"\n=== Run history (SecAgg+{' + DP' if dp_enabled else ''}, ablation row {6 if dp_enabled else 4}) ===")
         print(legacy_context.history)
+
+        fit_metrics_by_round = dict(legacy_context.history.metrics_distributed_fit.get("epsilon_spent", []))
+        if dp_enabled and fit_metrics_by_round:
+            print("\n=== Per-round mean epsilon_spent (across 3 hospitals' independent accountants) ===")
+            for round_num, eps in sorted(fit_metrics_by_round.items()):
+                print(f"round {round_num}: epsilon_spent={eps}")
 
         if mlflow_uri:
             for round_num, value in legacy_context.history.metrics_centralized.get("pooled_test_auroc", []):
@@ -145,6 +187,9 @@ def main(grid: Grid, context: Context) -> None:
             final_metrics = legacy_context.history.metrics_centralized.get("pooled_test_auroc", [])
             if final_metrics:
                 mlflow.log_metric("final_pooled_test_auroc", final_metrics[-1][1])
+            for key in ("epsilon_spent", "noise_multiplier", "wall_clock_seconds", "payload_bytes"):
+                for round_num, value in legacy_context.history.metrics_distributed_fit.get(key, []):
+                    mlflow.log_metric(key, value, step=round_num)
 
         final_ndarrays = legacy_context.state.array_records[MAIN_PARAMS_RECORD].to_numpy_ndarrays()
         final_state = {k: torch.tensor(arr) for k, arr in zip(reference_keys, final_ndarrays, strict=True)}
