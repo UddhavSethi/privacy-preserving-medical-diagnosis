@@ -188,7 +188,43 @@ JS (90KB gzipped) — well within limits, no fallback needed. Committed as
 `77225fb`. The temporary `?phase0_spike=1` block in `streamlit_app.py` and
 the throwaway `App.tsx` must be removed once Phase 1's real UI replaces them.
 
-## Phase 1: backend changes, then New Screening screen end-to-end — NOT STARTED
+## Phase 1: backend changes, then New Screening screen end-to-end — 1A COMPLETE (2026-09-27)
+
+**Committed as `0a977e0`** (local, not yet pushed). All of 1A below is done
+and tested (46 tests, real end-to-end runs against the actual secagg
+checkpoint/gate/image this session, not just mocks). 1B/1C/1D/1E are NOT
+started — `app/streamlit_app.py` has not been touched yet in Phase 1 (still
+has the Phase 0 `?phase0_spike` block only).
+
+**Real results from running D1/D2 for real against `fedavg_secagg`:**
+- D1 (`scripts/derive_app_decision_policy.py`): `decision_threshold=0.55`,
+  `temperature=1.1283` (this checkpoint is measurably overconfident, needs
+  softening -- opposite direction from round 9's own mild sharpening).
+  `abstention_half_width=0.05` -- but note the REAL finding: this
+  checkpoint's predictions cluster much more heavily near the decision
+  boundary than the fine-tuned checkpoint's do (895+832 of 4844 val examples
+  fall in calibrated [0.5,0.7) alone) -- actual abstain rate at half_width
+  0.05 is ~21%, not the nominal ~10% target. Every tested half-width
+  overshoots; 0.05 is just the closest available. Written into
+  `conf/app.yaml`'s `fedavg_secagg` entry with a comment explaining this.
+- D2 (`scripts/precompute_app_deferral_ood.py`): `deferral_threshold=0.6907`,
+  3 IsolationForest models committed to
+  `outputs/app_artifacts/fedavg_secagg/` (~5.5MB total, force-added past
+  `.gitignore`'s blanket `outputs/` rule, same pattern as the earlier
+  checkpoint-bundling work).
+- Verified the FULL pipeline end-to-end using ONLY these precomputed
+  artifacts (no live feature cache) -- simulating exactly what Cloud will
+  have: real "Pneumonia" prediction, real focus region (right lung, lower
+  zone), real OOD/certainty values, all correct.
+
+**Next step in a future session:** Phase 1B (the Streamlit polling loop --
+`ThreadPoolExecutor` + `session_state` + `st.rerun()`, per the plan's own
+1B section) and rewriting `app/streamlit_app.py` to actually call
+`app/analysis_job.py::run_job` and render the `pneumoscan(...)` component
+with real props from `app/presentation.py`. The backend is fully ready for
+this -- nothing in 1B/1C/1D needs new backend work, only Streamlit-side
+wiring and the actual React frontend (1E, not started at all -- still just
+the Phase 0 spike `App.tsx`).
 
 ### 1A — backend (Python only, testable in CI)
 
