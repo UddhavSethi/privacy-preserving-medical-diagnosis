@@ -57,6 +57,15 @@ venv/
 env/
 .python-version
 
+# ---- PneumoScan frontend (Node/React) ----
+# node_modules is always regenerable from package-lock.json via `npm ci`.
+# frontend/dist/ is the OPPOSITE: it must be committed, not ignored, since
+# Streamlit Community Cloud's build environment is Python/pip only and
+# cannot run `npm run build` itself -- the plan's Risk #1/#2. The blanket
+# `dist/` rule above would otherwise silently swallow it.
+app/pneumoscan_component/frontend/node_modules/
+!app/pneumoscan_component/frontend/dist/
+
 # ---- Testing / tooling ----
 .pytest_cache/
 .coverage

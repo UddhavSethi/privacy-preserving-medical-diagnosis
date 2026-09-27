@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D anatomical explorer</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+    "three/addons/controls/OrbitControls.js": "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js"
+  },
+  "integrity": {
+    "https://unpkg.com/three@0.184.0/build/three.module.js": "sha384-8FCZ1eVO6it4+pbec2aDtnTrwjWXZLJRC+MAGCIPDgsYnUrl/E0A2YlF8ioMKI/J",
+    "https://unpkg.com/three@0.184.0/build/three.core.js": "sha384-dw2ooPewaEIrAgl6oFDBmmBWCE9oW9LxRGcfwZ0hLvEprzo202wXl7vCYHRlSnOT",
+    "https://unpkg.com/three@0.184.0/examples/jsm/controls/OrbitControls.js": "sha384-4rziNxOBZKQ69i+w+f89KJ55TCYquwchVbByQwmaOeIOXdOU2PLDn3kOfXHwIJC9"
+  }
+}
+</script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: "IBM Plex Sans", Helvetica, Arial, sans-serif; }
+  body { background: radial-gradient(120% 95% at 50% 36%, #17252c 0%, #0c1317 46%, #05070a 100%); }
+  canvas { display: block; outline: none; touch-action: none; }
+  #lines { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(255,255,255,0.016) 0 1px, transparent 1px 4px); }
+  #vign { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(0,0,0,0.55) 100%); }
+  #tip { position: absolute; pointer-events: none; padding: 8px 11px; border-radius: 8px; background: rgba(10,15,18,0.9); border: 1px solid rgba(143,208,214,0.25); color: #eef3f5; transform: translate(14px, -50%); opacity: 0; transition: opacity .12s; white-space: nowrap; }
+  #tip b { display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #9fe0e4; }
+  #tip span { display: block; font-size: 12.5px; margin-top: 2px; }
+  #tip em { display: block; font-style: normal; font-size: 11px; color: #8fa0a7; margin-top: 2px; }
+  .side { position: absolute; font: 600 13px "IBM Plex Mono", monospace; color: #8fa7ad; pointer-events: none; transform: translate(-50%, -50%); transition: opacity .3s; }
+  #focusLbl { position: absolute; pointer-events: none; display: flex; align-items: center; gap: 0; opacity: 0; transition: opacity .5s; }
+  #focusLbl .ln { width: 56px; height: 1px; background: rgba(240,179,90,0.75); }
+  #focusLbl .dt { width: 7px; height: 7px; border-radius: 50%; background: #ffc27a; box-shadow: 0 0 10px 2px rgba(255,170,80,0.7); flex: none; }
+  #focusLbl .bx { padding: 7px 10px; border-radius: 7px; background: rgba(22,17,10,0.82); border: 1px solid rgba(240,179,90,0.45); }
+  #focusLbl b { display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.14em; color: #f6cf94; }
+  #focusLbl span { display: block; font-size: 11.5px; color: #d9c6a5; margin-top: 2px; white-space: nowrap; }
+  #gizmo { position: absolute; right: 16px; bottom: 16px; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+  #gizmo .nm { font: 600 11px "IBM Plex Mono", monospace; letter-spacing: 0.16em; color: #b9c7cc; }
+  #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6f7f86; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="loading">Loading 3D view…</div>
+<div id="lines"></div>
+<div id="vign"></div>
+<div class="side" id="markR">R</div>
+<div class="side" id="markL">L</div>
+<div id="focusLbl"><div class="dt"></div><div class="ln"></div><div class="bx"><b>AI FOCUS</b><span>Illustrative AI focus region</span></div></div>
+<div id="gizmo"><svg width="84" height="84" viewBox="-42 -42 84 84"><circle r="37" fill="rgba(10,14,17,0.6)" stroke="rgba(143,160,167,0.25)"></circle><g id="gz"></g></svg><div class="nm" id="vname">FRONT</div></div>
+<div id="tip"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setClearColor(0x000000, 0);
+document.body.insertBefore(renderer.domElement, document.body.firstChild);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const T0 = V(0, 0.2, 0);
+const DIRS = { front: V(0, 0.1, 1).normalize(), left: V(1, 0.1, 0).normalize(), right: V(-1, 0.1, 0).normalize(), top: V(0, 1, 0.02).normalize() };
+let D = 7.4;
+camera.position.copy(T0).addScaledVector(DIRS.front, D);
+const controls = new OrbitControls(camera, renderer.domElement);
+Object.assign(controls, { enableDamping: true, dampingFactor: 0.08, minDistance: 2.6, maxDistance: 16, rotateSpeed: 0.7, zoomSpeed: 0.8, autoRotateSpeed: 0.45 });
+controls.target.copy(T0);
+
+scene.add(new THREE.HemisphereLight(0xdcecf0, 0x0b1114, 1.0));
+const keyL = new THREE.DirectionalLight(0xffffff, 1.5); keyL.position.set(3, 5, 6); scene.add(keyL);
+const rimL = new THREE.DirectionalLight(0x8fd3da, 1.3); rimL.position.set(-4, 2, -5); scene.add(rimL);
+
+function radialTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.25, 'rgba(255,255,255,0.55)'); g.addColorStop(0.6, 'rgba(255,255,255,0.12)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const TEX = radialTex();
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+const root = new THREE.Group(); scene.add(root);
+const breath = new THREE.Group(); root.add(breath);
+const airG = new THREE.Group(); root.add(airG);
+const gTrachea = new THREE.Group(), gMain = new THREE.Group(), gTree = new THREE.Group(); airG.add(gTrachea, gMain, gTree);
+const ribsG = new THREE.Group(), spineG = new THREE.Group(), heartG = new THREE.Group(); root.add(ribsG, spineG, heartG);
+
+// ---------- Lungs ----------
+const lungVert = `
+varying vec3 vN; varying vec3 vV; varying vec3 vW;
+void main(){
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - w.xyz);
+  gl_Position = projectionMatrix * viewMatrix * w;
+}`;
+const lungFrag = `
+uniform float uTime, uOpacity, uSelPulse, uFocusOn, uFocusR, uFocusPulse, uScanOn, uScanY;
+uniform vec3 uBase, uHover, uSelect, uFocusC;
+uniform vec2 uRest;
+varying vec3 vN; varying vec3 vV; varying vec3 vW;
+float band(vec3 b, float y){ return b.z * smoothstep(b.x - 0.035, b.x + 0.035, y) * (1.0 - smoothstep(b.y - 0.035, b.y + 0.035, y)); }
+void main(){
+  float y = (vW.y - uRest.x) / uRest.y;
+  float ndv = abs(dot(normalize(vN), normalize(vV)));
+  float fres = pow(1.0 - ndv, 2.2);
+  vec3 col = uBase * (0.5 + 0.95 * fres);
+  float a = 0.035 + fres * 0.52;
+  float sweep = exp(-pow((y + vW.x * 0.35 - (mod(uTime * 0.42, 5.2) - 2.4)) / 0.2, 2.0));
+  col += vec3(0.55, 0.85, 0.9) * sweep * 0.32; a += sweep * 0.05;
+  float hv = band(uHover, y);
+  col += vec3(0.35, 0.55, 0.6) * hv; a += 0.15 * hv;
+  float sl = band(uSelect, y);
+  float edge = uSelect.z * (exp(-pow((y - uSelect.x) / 0.014, 2.0)) + exp(-pow((y - uSelect.y) / 0.014, 2.0)));
+  col = mix(col, vec3(0.34, 0.88, 0.93), sl * (0.5 + 0.45 * uSelPulse));
+  a += sl * (0.14 + 0.3 * uSelPulse) + edge * 0.45;
+  col += vec3(0.5, 0.95, 1.0) * edge * 0.8;
+  float d = distance(vW, uFocusC);
+  float fz = uFocusOn * exp(-d * d / (2.0 * uFocusR * uFocusR));
+  float pulse = 0.85 + 0.15 * sin(uTime * 2.4) + uFocusPulse;
+  col = mix(col, vec3(1.0, 0.64, 0.26), clamp(fz * 1.3, 0.0, 1.0));
+  a += fz * 0.55 * pulse;
+  float ring = uFocusOn * exp(-pow((d - uFocusR * 1.8) / 0.03, 2.0)) * (0.55 + 0.45 * sin(uTime * 2.4));
+  col += vec3(1.0, 0.72, 0.35) * ring * 0.9; a += ring * 0.28;
+  float sc = uScanOn * exp(-pow((vW.y - uScanY) / 0.055, 2.0));
+  col += vec3(0.45, 0.95, 1.0) * sc * 1.2; a += sc * 0.5;
+  gl_FragColor = vec4(col, clamp(a, 0.0, 1.0) * uOpacity);
+}`;
+function lungMat() {
+  return new THREE.ShaderMaterial({
+    vertexShader: lungVert, fragmentShader: lungFrag, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    uniforms: {
+      uTime: { value: 0 }, uOpacity: { value: 1 }, uSelPulse: { value: 0 }, uFocusOn: { value: 0 }, uFocusR: { value: 0.28 }, uFocusPulse: { value: 0 },
+      uScanOn: { value: 0 }, uScanY: { value: 0 }, uBase: { value: new THREE.Color(0x8fd0d6) }, uHover: { value: V(0, 0, 0) },
+      uSelect: { value: V(0, 0, 0) }, uFocusC: { value: V(0, 0, 0) }, uRest: { value: new THREE.Vector2(0, 1) }
+    }
+  });
+}
+function lungGeometry(side) {
+  const g = new THREE.SphereGeometry(1, 96, 72);
+  const p = g.attributes.position, v = new THREE.Vector3();
+  const s = side === 'right' ? -1 : 1;
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    let { x, y, z } = v;
+    const t = (y + 1) / 2;
+    const w = 1 - 0.5 * Math.pow(t, 2.4);
+    x *= w; z *= (0.6 + 0.4 * (1 - Math.pow(t, 2.4)));
+    let m = -s * x;
+    if (m > 0.4) m = 0.4 + (m - 0.4) * 0.3;
+    if (side === 'left' && m > 0 && z > -0.1) { const k = smooth(0.2, -0.1, y) * smooth(-0.95, -0.55, y) * smooth(-0.1, 0.4, z); m -= 0.22 * k; }
+    x = -s * m;
+    const rxz = Math.min(1, Math.sqrt(v.x * v.x + v.z * v.z));
+    const b = smooth(-0.25, -1, y);
+    y = y * (1 - b) + (-0.72 + 0.34 * (1 - rxz * rxz)) * b;
+    z = z < 0 ? z * 0.95 : z * 0.7;
+    p.setXYZ(i, x, y, z);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+const LUNG = { right: { x: -0.74, sx: 0.66, sy: 1.16, sz: 0.8, y: -0.02 }, left: { x: 0.72, sx: 0.6, sy: 1.22, sz: 0.8, y: 0.02 } };
+const lungs = {}, bounds = {};
+for (const side of ['right', 'left']) {
+  const d = LUNG[side];
+  const mesh = new THREE.Mesh(lungGeometry(side), lungMat());
+  mesh.name = side + '_lung'; mesh.position.set(d.x, d.y, 0); mesh.scale.set(d.sx, d.sy, d.sz);
+  mesh.userData = { kind: 'lung', side }; mesh.renderOrder = 5;
+  breath.add(mesh); lungs[side] = mesh;
+}
+scene.updateMatrixWorld(true);
+for (const side of ['right', 'left']) bounds[side] = new THREE.Box3().setFromObject(lungs[side]);
+function zoneRange(side, zone) {
+  const b = bounds[side], h = b.max.y - b.min.y, i = { upper: 2, middle: 1, lower: 0 }[zone];
+  const cuts = [b.min.y, b.min.y + h * 0.38, b.min.y + h * 0.68, b.max.y];
+  return [cuts[i], cuts[i + 1]];
+}
+function zoneAt(side, y) { for (const z of ['lower', 'middle', 'upper']) { if (y <= zoneRange(side, z)[1] + 1e-6) return z; } return 'upper'; }
+
+// Fissures (lobes)
+const ray = new THREE.Raycaster();
+const fissureMat = new THREE.LineBasicMaterial({ color: 0xd8f3f5, transparent: true, opacity: 0.5, depthWrite: false });
+const fissures = [];
+function surfaceLoop(mesh, p0, e1, e2, keep) {
+  const runs = []; let cur = [];
+  for (let k = 0; k <= 140; k++) {
+    const th = k / 140 * Math.PI * 2;
+    const d = e1.clone().multiplyScalar(Math.cos(th)).addScaledVector(e2, Math.sin(th)).normalize();
+    ray.set(p0, d);
+    const h = ray.intersectObject(mesh, false)[0];
+    if (h && keep(h.point)) cur.push(h.point.clone().addScaledVector(d, 0.006));
+    else { if (cur.length > 1) runs.push(cur); cur = []; }
+  }
+  if (cur.length > 1) runs.push(cur);
+  runs.forEach(r => { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(r), fissureMat); l.renderOrder = 6; breath.add(l); fissures.push(l); });
+}
+const OBL = { right: { p: V(LUNG.right.x, -0.1, 0), n: V(0, 1.2, 1.3).normalize() }, left: { p: V(LUNG.left.x, -0.05, 0), n: V(0, 1.1, 1.3).normalize() } };
+const HOR_Y = 0.24;
+const oblSide = (side, p) => p.clone().sub(OBL[side].p).dot(OBL[side].n);
+for (const side of ['right', 'left']) {
+  const o = OBL[side], e1 = V(1, 0, 0), e2 = new THREE.Vector3().crossVectors(o.n, e1).normalize();
+  surfaceLoop(lungs[side], o.p, e1, e2, () => true);
+}
+surfaceLoop(lungs.right, V(LUNG.right.x, HOR_Y, 0.05), V(1, 0, 0), V(0, 0, 1), p => oblSide('right', p) > 0.02);
+function lobeOf(side, p) {
+  if (oblSide(side, p) < 0) return side === 'right' ? 'Right lower lobe' : 'Left lower lobe';
+  if (side === 'left') return 'Left upper lobe';
+  return p.y > HOR_Y ? 'Right upper lobe' : 'Right middle lobe';
+}
+
+// ---------- Airways ----------
+const airMat = (o) => { const m = new THREE.MeshStandardMaterial({ color: 0xe4eef0, roughness: 0.38, metalness: 0.05, emissive: 0x4fc3ca, emissiveIntensity: 0.05, transparent: true, opacity: o }); m.userData.base = o; return m; };
+const boneMat = () => { const m = new THREE.MeshStandardMaterial({ color: 0xebe2d2, roughness: 0.55, transparent: true, opacity: 0.55, emissive: 0x6a6150, emissiveIntensity: 0.12, depthWrite: false }); m.userData.base = 0.55; return m; };
+const mats = { trachea: airMat(0.95), main: airMat(0.93), tree: airMat(0.85), ribs: boneMat(), spine: boneMat() };
+mats.heart = new THREE.MeshStandardMaterial({ color: 0xc58f88, roughness: 0.55, transparent: true, opacity: 0.22, depthWrite: false, emissive: 0x6a2a24, emissiveIntensity: 0.15 }); mats.heart.userData.base = 0.22;
+const pickables = [lungs.right, lungs.left];
+function tube(parent, id, a, b, r1, r2, mat) {
+  const dir = new THREE.Vector3().subVectors(b, a), len = dir.length();
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r2, r1, len, 18, 1), mat);
+  m.position.copy(a).addScaledVector(dir, 0.5);
+  m.quaternion.setFromUnitVectors(V(0, 1, 0), dir.normalize());
+  m.userData = { kind: 'structure', id }; parent.add(m); pickables.push(m);
+  const j = new THREE.Mesh(new THREE.SphereGeometry(r2, 14, 10), mat); j.position.copy(b); j.userData = m.userData; parent.add(j); pickables.push(j);
+}
+const carina = V(0, 0.55, 0.02);
+tube(gTrachea, 'trachea', V(0, 1.95, 0.05), carina, 0.095, 0.09, mats.trachea);
+for (let i = 0; i < 10; i++) {
+  const r = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.012, 8, 32), mats.trachea);
+  r.rotation.x = Math.PI / 2; r.position.set(0, 1.82 - i * 0.12, 0.05 - i * 0.003); r.userData = { kind: 'structure', id: 'trachea' };
+  gTrachea.add(r); pickables.push(r);
+}
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+function branch(start, dir, len, r, depth) {
+  const end = start.clone().addScaledVector(dir, len);
+  tube(gTree, 'tree', start, end, r, r * 0.76, mats.tree);
+  if (depth <= 0) return;
+  for (let k = 0; k < 2; k++) {
+    const d = dir.clone();
+    const axis = V(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).cross(dir).normalize();
+    d.applyAxisAngle(axis, (k === 0 ? 1 : -1) * (0.3 + rnd() * 0.25)).normalize();
+    branch(end, d, len * (0.64 + rnd() * 0.08), r * 0.72, depth - 1);
+  }
+}
+const hilumR = V(-0.5, 0.25, 0.02), hilumL = V(0.52, 0.18, 0.02);
+tube(gMain, 'main', carina, hilumR, 0.075, 0.066, mats.main);
+tube(gMain, 'main', carina, hilumL, 0.07, 0.06, mats.main);
+branch(hilumR, V(-0.45, 1, 0.05).normalize(), 0.3, 0.05, 4);
+branch(hilumR, V(-1, -0.2, 0.35).normalize(), 0.27, 0.045, 4);
+branch(hilumR, V(-0.3, -1, -0.1).normalize(), 0.34, 0.054, 4);
+branch(hilumL, V(0.4, 1, 0.08).normalize(), 0.3, 0.048, 4);
+branch(hilumL, V(0.3, -1, -0.12).normalize(), 0.36, 0.052, 4);
+
+// ---------- Reference anatomy ----------
+const heart = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 28), mats.heart);
+heart.scale.set(0.5, 0.56, 0.42); heart.position.set(0.18, -0.52, 0.22); heart.rotation.z = -0.5;
+heart.userData = { kind: 'structure', id: 'heart' }; heartG.add(heart); pickables.push(heart);
+const RW = [0.55, 0.72, 0.85, 0.94, 1, 1.03, 1.03, 1.0, 0.95, 0.88];
+for (let i = 0; i < 10; i++) {
+  const py = 1.55 - i * 0.28, w = RW[i];
+  for (const s of [-1, 1]) {
+    const pts = [V(s * 0.14, py, -0.86), V(s * 0.75 * w, py + 0.02, -0.82), V(s * 1.42 * w, py - 0.12, -0.3), V(s * 1.48 * w, py - 0.32, 0.25)];
+    if (i < 7) pts.push(V(s * 1.05 * w, py - 0.52, 0.66), V(s * 0.28, py - 0.62, 0.78));
+    else pts.push(V(s * 1.2 * w, py - 0.46, 0.5));
+    const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 48, 0.026, 8), mats.ribs);
+    m.userData = { kind: 'structure', id: 'ribs' }; ribsG.add(m); pickables.push(m);
+  }
+}
+const sternum = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.65, 0.06), mats.ribs);
+sternum.position.set(0, 0.2, 0.8); sternum.userData = { kind: 'structure', id: 'ribs' }; ribsG.add(sternum); pickables.push(sternum);
+for (const s of [-1, 1]) {
+  const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([V(s * 0.14, 1.2, 0.78), V(s * 0.7, 1.32, 0.62), V(s * 1.35, 1.45, 0.15)]), 32, 0.03, 8), mats.ribs);
+  m.userData = { kind: 'structure', id: 'ribs' }; ribsG.add(m); pickables.push(m);
+}
+for (let i = 0; i < 21; i++) {
+  const y = 2.0 - i * 0.195;
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.14, 20), mats.spine);
+  body.position.set(0, y, -0.97); body.userData = { kind: 'structure', id: 'spine' }; spineG.add(body); pickables.push(body);
+  const pr = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.22), mats.spine);
+  pr.position.set(0, y - 0.02, -1.15); pr.rotation.x = 0.35; pr.userData = { kind: 'structure', id: 'spine' }; spineG.add(pr); pickables.push(pr);
+}
+
+// ---------- Environment ----------
+const floorY = -2.05;
+const polar = new THREE.PolarGridHelper(3.1, 16, 6, 96, 0x2c4a52, 0x1d3238);
+polar.position.y = floorY; polar.material.transparent = true; polar.material.opacity = 0.4; polar.material.depthWrite = false; scene.add(polar);
+function circle(r, seg, color, op, dashed) {
+  const pts = []; for (let i = 0; i <= seg; i++) { const a = i / seg * Math.PI * 2; pts.push(V(Math.cos(a) * r, 0, Math.sin(a) * r)); }
+  const g = new THREE.BufferGeometry().setFromPoints(pts);
+  const m = dashed ? new THREE.LineDashedMaterial({ color, dashSize: 0.07, gapSize: 0.06, transparent: true, opacity: op, depthWrite: false }) : new THREE.LineBasicMaterial({ color, transparent: true, opacity: op, depthWrite: false });
+  const l = new THREE.Line(g, m); if (dashed) l.computeLineDistances(); return l;
+}
+const ringA = circle(2.35, 180, 0x56c7cd, 0.3); ringA.position.y = floorY; scene.add(ringA);
+const tickG = new THREE.Group(); tickG.position.y = floorY; scene.add(tickG);
+{ const tp = []; for (let i = 0; i < 120; i++) { const a = i / 120 * Math.PI * 2, r2 = i % 10 === 0 ? 2.62 : 2.5; tp.push(V(Math.cos(a) * 2.42, 0, Math.sin(a) * 2.42), V(Math.cos(a) * r2, 0, Math.sin(a) * r2)); }
+  tickG.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(tp), new THREE.LineBasicMaterial({ color: 0x56c7cd, transparent: true, opacity: 0.28, depthWrite: false }))); }
+const ringMid = circle(1.95, 220, 0x7fb8c0, 0.14, true); ringMid.position.y = -1.3; scene.add(ringMid);
+const DN = 320, dpos = new Float32Array(DN * 3);
+for (let i = 0; i < DN; i++) { dpos[i * 3] = (Math.random() - 0.5) * 7; dpos[i * 3 + 1] = Math.random() * 5 - 2.2; dpos[i * 3 + 2] = (Math.random() - 0.5) * 6; }
+const dustGeo = new THREE.BufferGeometry(); dustGeo.setAttribute('position', new THREE.BufferAttribute(dpos, 3));
+const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ color: 0x9fd6dc, size: 0.025, map: TEX, transparent: true, opacity: 0.32, depthWrite: false, blending: THREE.AdditiveBlending }));
+scene.add(dust);
+
+// ---------- AI focus ----------
+const focusG = new THREE.Group(); breath.add(focusG);
+const spr = (color, s) => { const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX, color, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false })); m.scale.setScalar(s); m.renderOrder = 20; focusG.add(m); return m; };
+const glow = spr(0xff9a3c, 1.3), core = spr(0xffd6a0, 0.3);
+const fRings = [0, 1].map(() => { const m = new THREE.Mesh(new THREE.TorusGeometry(1, 0.008, 8, 96), new THREE.MeshBasicMaterial({ color: 0xffb35c, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })); m.rotation.x = Math.PI / 2; m.renderOrder = 21; focusG.add(m); return m; });
+const FP = 90, fpos = new Float32Array(FP * 3);
+for (let i = 0; i < FP; i++) { const u = Math.random() * 2 - 1, th = Math.random() * Math.PI * 2, r = 0.2 + Math.random() * 0.3, q = Math.sqrt(1 - u * u); fpos[i * 3] = q * Math.cos(th) * r; fpos[i * 3 + 1] = u * r; fpos[i * 3 + 2] = q * Math.sin(th) * r; }
+const fpGeo = new THREE.BufferGeometry(); fpGeo.setAttribute('position', new THREE.BufferAttribute(fpos, 3));
+const fParts = new THREE.Points(fpGeo, new THREE.PointsMaterial({ color: 0xffb870, size: 0.04, map: TEX, transparent: true, opacity: 0, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+fParts.renderOrder = 22; focusG.add(fParts);
+
+// ---------- Scan ----------
+const scanG = new THREE.Group(); root.add(scanG);
+const scanPlane = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 3.4), new THREE.MeshBasicMaterial({ map: TEX, color: 0x56c7cd, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+scanPlane.rotation.x = -Math.PI / 2; scanG.add(scanPlane);
+const scanRing = circle(1.85, 180, 0x7fe3e8, 0); scanG.add(scanRing);
+const SP = 140, spos = new Float32Array(SP * 3);
+for (let i = 0; i < SP; i++) { const a = Math.random() * Math.PI * 2, r = 1.1 + Math.random() * 0.8; spos[i * 3] = Math.cos(a) * r; spos[i * 3 + 1] = 0; spos[i * 3 + 2] = Math.sin(a) * r; }
+const spGeo = new THREE.BufferGeometry(); spGeo.setAttribute('position', new THREE.BufferAttribute(spos, 3));
+const scanParts = new THREE.Points(spGeo, new THREE.PointsMaterial({ color: 0x9fecef, size: 0.035, map: TEX, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+scanG.add(scanParts);
+
+// ---------- State ----------
+let S = { focus: null, showFocus: true, select: null, mode: 'clinician', layers: { lungs: true, lobes: true, bronchi: true, trachea: true, heart: true, ribs: false, spine: false }, breathing: !RM, autoRotate: !RM, scan: { active: false } };
+const F = { lungs: 1, lobes: 1, bronchi: 1, trachea: 1, heart: 1, ribs: 0, spine: 0, focus: 0 };
+let selT0 = -1e9, focusT0 = -1e9, lastInteract = 0, hover = null, motion = S.breathing ? 1 : 0, scanA = 0;
+const focusRest = V(0, 0, 0);
+const STRUCT_T = { trachea: [V(0, 1.2, 0), 0.62], main: [V(0, 0.45, 0), 0.62], tree: [V(0, 0.2, 0), 0.72], heart: [V(0.18, -0.5, 0.2), 0.7], ribs: [T0, 1], spine: [T0, 1] };
+
+function onFocus(wasNull) {
+  const f = S.focus;
+  if (!f) return;
+  const b = bounds[f.side], [za, zb] = zoneRange(f.side, f.zone);
+  const x = Math.min(b.max.x - 0.22, Math.max(b.min.x + 0.22, ((f.u ?? (f.side === 'right' ? 0.28 : 0.72)) - 0.5) * 2.9));
+  const t = Math.min(1, Math.max(0, ((f.v ?? 0.5) - 0.12) / 0.68));
+  const y = Math.min(zb - 0.08, Math.max(za + 0.08, b.max.y - t * (b.max.y - b.min.y)));
+  focusRest.set(x, y, 0.06);
+  focusG.position.copy(focusRest);
+  if (wasNull) focusT0 = performance.now();
+}
+function selTarget(sel) {
+  if (!sel) return null;
+  if (sel.kind === 'zone') {
+    const sd = sel.side === 'both' ? 'right' : sel.side, [a, b] = zoneRange(sd, sel.zone), yc = (a + b) / 2;
+    return sel.side === 'both' ? [V(0, yc, 0), 0.82] : [V(LUNG[sel.side].x * 0.85, yc, 0), 0.62];
+  }
+  return STRUCT_T[sel.id] || null;
+}
+let tw = null;
+function tweenTo(target, dir, dist, ms) {
+  const fromT = controls.target.clone(), off = camera.position.clone().sub(fromT), fromDist = off.length();
+  const fromDir = off.normalize();
+  tw = { t0: performance.now(), ms: RM ? 1 : ms, fromT, target: target.clone(), fromDir, q: new THREE.Quaternion().setFromUnitVectors(fromDir, dir.clone().normalize()), fromDist, dist };
+}
+function stepTween(now) {
+  if (!tw) return;
+  const k = Math.min(1, (now - tw.t0) / tw.ms), e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+  const dir = tw.fromDir.clone().applyQuaternion(new THREE.Quaternion().slerp(tw.q, e));
+  controls.target.lerpVectors(tw.fromT, tw.target, e);
+  camera.position.copy(controls.target).addScaledVector(dir, tw.fromDist + (tw.dist - tw.fromDist) * e);
+  if (k >= 1) tw = null;
+}
+const curDir = () => camera.position.clone().sub(controls.target).normalize();
+const curDist = () => camera.position.distanceTo(controls.target);
+function onSelect() {
+  selT0 = performance.now();
+  const t = selTarget(S.select);
+  if (t) tweenTo(t[0].clone().add(V(0, root.position.y, 0)), curDir(), D * t[1], 1000);
+}
+function view(v) {
+  lastInteract = performance.now();
+  if (DIRS[v]) tweenTo(controls.target, DIRS[v], curDist(), 900);
+  else if (v === 'reset') tweenTo(T0, DIRS.front, D, 1000);
+  else if (v === 'zoomIn') tweenTo(controls.target, curDir(), Math.max(controls.minDistance, curDist() * 0.8), 350);
+  else if (v === 'zoomOut') tweenTo(controls.target, curDir(), Math.min(controls.maxDistance, curDist() * 1.25), 350);
+}
+addEventListener('message', (e) => {
+  const d = e.data || {};
+  if (d.type === 'pneumoscan-lung' && d.state) {
+    const ps = JSON.stringify(S.select), pf = JSON.stringify(S.focus);
+    S = { ...S, ...d.state, layers: { ...S.layers, ...(d.state.layers || {}) }, scan: d.state.scan || S.scan };
+    if (JSON.stringify(S.select) !== ps) onSelect();
+    if (JSON.stringify(S.focus) !== pf) onFocus(pf === 'null');
+  }
+  if (d.type === 'pneumoscan-view') view(d.view);
+});
+parent.postMessage({ type: 'pneumoscan-lung-ready' }, '*');
+
+// ---------- Picking ----------
+const ptr = new THREE.Vector2(), tip = document.getElementById('tip');
+const NAMES = { trachea: ['Trachea', 'Main airway'], main: ['Main bronchi', 'Airways into each lung'], tree: ['Bronchial tree', 'Branching airways'], heart: ['Heart', 'Shown for reference'], ribs: ['Rib cage', 'Shown for reference'], spine: ['Spine', 'Shown for reference'] };
+const ZN = { upper: 'Upper', middle: 'Middle', lower: 'Lower' };
+const LAYER_OF = { trachea: 'trachea', main: 'bronchi', tree: 'bronchi', heart: 'heart', ribs: 'ribs', spine: 'spine' };
+const toRest = (p) => V((p.x) / breath.scale.x, (p.y - root.position.y) / breath.scale.y, p.z / breath.scale.z);
+function pick(ev) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ptr.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ptr, camera);
+  const vis = pickables.filter(o => o.userData.kind === 'lung' ? F.lungs > 0.5 : F[LAYER_OF[o.userData.id]] > 0.5);
+  const hits = ray.intersectObjects(vis, false);
+  if (!hits.length) return null;
+  let h = hits[0];
+  if (h.object.userData.kind === 'lung') {
+    const inner = hits.find(x => x.object.userData.kind === 'structure' && (x.object.userData.id === 'trachea' || x.object.userData.id === 'main'));
+    if (inner && hits.filter(x => x.object.userData.kind === 'lung' && x.distance < inner.distance).length <= 1) h = inner;
+  }
+  const u = h.object.userData;
+  if (u.kind === 'lung') {
+    const rp = toRest(h.point), zone = zoneAt(u.side, rp.y);
+    const isF = S.focus && S.showFocus && S.focus.side === u.side && S.focus.zone === zone;
+    return { sel: { kind: 'zone', side: u.side, zone }, title: (u.side === 'right' ? 'Right' : 'Left') + ' lung', sub: ZN[zone] + ' region' + (S.mode === 'patient' ? '' : ' · ' + lobeOf(u.side, rp)), note: isF ? 'Illustrative AI focus region' : S.mode === 'patient' ? 'Tap to learn about this region' : 'Approximate anatomical region' };
+  }
+  const n = NAMES[u.id];
+  return { sel: { kind: 'structure', id: u.id }, title: n[0], sub: n[1], note: 'Approximate anatomical structure', id: u.id };
+}
+let down = null;
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  const h = pick(ev); hover = h;
+  if (h) { tip.innerHTML = `<b>${h.title}</b><span>${h.sub}</span><em>${h.note}</em>`; tip.style.left = ev.clientX + 'px'; tip.style.top = ev.clientY + 'px'; tip.style.opacity = 1; renderer.domElement.style.cursor = 'pointer'; }
+  else { tip.style.opacity = 0; renderer.domElement.style.cursor = down ? 'grabbing' : 'grab'; }
+});
+renderer.domElement.addEventListener('pointerleave', () => { tip.style.opacity = 0; hover = null; });
+renderer.domElement.addEventListener('pointerdown', (ev) => { down = [ev.clientX, ev.clientY]; });
+renderer.domElement.addEventListener('pointerup', (ev) => {
+  if (down && Math.hypot(ev.clientX - down[0], ev.clientY - down[1]) < 5) { const h = pick(ev); if (h) parent.postMessage({ type: 'pneumoscan-lung-select', sel: h.sel }, '*'); }
+  down = null;
+});
+controls.addEventListener('start', () => { lastInteract = performance.now(); tw = null; });
+controls.addEventListener('end', () => { lastInteract = performance.now(); });
+
+// ---------- Resize ----------
+let sized = false;
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  D = 7.4 * Math.max(1, 1.1 / (w / h));
+  if (!sized) { camera.position.copy(T0).addScaledVector(DIRS.front, D); sized = true; }
+}
+addEventListener('resize', resize); resize();
+
+// ---------- Frame ----------
+const mR = document.getElementById('markR'), mL = document.getElementById('markL'), fl = document.getElementById('focusLbl'), gz = document.getElementById('gz'), vname = document.getElementById('vname');
+const tmp = new THREE.Vector3(), fw = new THREE.Vector3(), sw = new THREE.Vector3();
+const AX = [{ v: V(1, 0, 0), p: 'L', n: 'R', c: '#56c7cd' }, { v: V(0, 1, 0), p: 'S', n: 'I', c: '#dfe6e9' }, { v: V(0, 0, 1), p: 'A', n: 'P', c: '#e0a040' }];
+let lastName = '', lastQ = '', loadingGone = false, last = 0;
+const t0 = performance.now();
+function project(p, el) { tmp.copy(p).project(camera); el.style.left = (tmp.x * 0.5 + 0.5) * innerWidth + 'px'; el.style.top = (-tmp.y * 0.5 + 0.5) * innerHeight + 'px'; return tmp; }
+function frame() {
+  const now = performance.now(); last = now;
+  const t = (now - t0) / 1000;
+  for (const k in F) { const tg = k === 'focus' ? (S.focus && S.showFocus ? 1 : 0) : (S.layers[k] ? 1 : 0); F[k] += (tg - F[k]) * (RM ? 1 : 0.1); }
+  motion += ((S.breathing ? 1 : 0) - motion) * 0.05;
+  const b = Math.sin(t * Math.PI * 2 / 5);
+  breath.scale.set(1 + 0.03 * b * motion, 1 + 0.02 * b * motion, 1 + 0.032 * b * motion);
+  airG.scale.set(1 + 0.008 * b * motion, 1 + 0.01 * b * motion, 1 + 0.008 * b * motion);
+  root.position.y = 0.035 * Math.sin(t * 0.55) * motion;
+  tickG.rotation.y = t * 0.03 * (RM ? 0 : 1); ringMid.rotation.y = -t * 0.05 * (RM ? 0 : 1);
+  if (!RM) { const pa = dustGeo.attributes.position; for (let i = 0; i < DN; i++) { let y = pa.getY(i) + 0.0012; if (y > 2.8) y = -2.2; pa.setY(i, y); } pa.needsUpdate = true; }
+  root.updateMatrixWorld(true);
+
+  // scan
+  const sc = S.scan || {};
+  scanA += ((sc.active ? 1 : 0) - scanA) * 0.06;
+  const top = 1.55, bot = -1.15, p = sc.progress || 0;
+  let sy = p < 0.76 ? top - (p / 0.76) * (top - bot) : (S.focus ? focusRest.y * breath.scale.y : (top + bot) / 2);
+  if (!sc.active && scanA < 0.02) sy = top;
+  scanG.position.y += (sy - scanG.position.y) * (sc.active ? 0.12 : 0.05);
+  scanG.rotation.y = t * 0.4;
+  scanPlane.material.opacity = 0.34 * scanA; scanRing.material.opacity = 0.7 * scanA; scanParts.material.opacity = 0.8 * scanA;
+  scanG.visible = scanA > 0.01;
+  scanG.getWorldPosition(sw);
+
+  // focus
+  const fa = F.focus, fpulse = Math.exp(-(now - focusT0) / 1000 * 1.6);
+  focusG.visible = fa > 0.01;
+  focusG.getWorldPosition(fw);
+  glow.material.opacity = fa * (0.5 + 0.18 * Math.sin(t * 2.4) + 0.5 * fpulse); glow.scale.setScalar(1.2 + 0.08 * Math.sin(t * 2.4) + 0.8 * fpulse);
+  core.material.opacity = fa * 0.9;
+  fRings.forEach((r, k) => { const ph = ((t * 0.45 + k * 0.5) % 1); r.scale.setScalar(0.22 + ph * 0.6); r.material.opacity = fa * (1 - ph) * 0.75; });
+  fParts.rotation.y = t * 0.35; fParts.rotation.x = Math.sin(t * 0.3) * 0.3; fParts.material.opacity = fa * 0.75;
+
+  // lungs
+  const selPulse = Math.exp(-(now - selT0) / 1000 * 2.5);
+  for (const side of ['right', 'left']) {
+    const U = lungs[side].material.uniforms;
+    U.uTime.value = t; U.uOpacity.value = F.lungs; lungs[side].visible = F.lungs > 0.01;
+    U.uRest.value.set(root.position.y, breath.scale.y);
+    const hz = hover && hover.sel.kind === 'zone' && hover.sel.side === side ? zoneRange(side, hover.sel.zone) : null;
+    U.uHover.value.set(hz ? hz[0] : 0, hz ? hz[1] : 0, hz ? 1 : 0);
+    const s = S.select, sz = s && s.kind === 'zone' && (s.side === 'both' || s.side === side) ? zoneRange(side, s.zone) : null;
+    U.uSelect.value.set(sz ? sz[0] : 0, sz ? sz[1] : 0, sz ? 1 : 0);
+    U.uSelPulse.value = selPulse;
+    U.uFocusOn.value = S.focus && S.focus.side === side ? fa : 0; U.uFocusC.value.copy(fw); U.uFocusPulse.value = fpulse * 0.8;
+    U.uScanOn.value = scanA; U.uScanY.value = sw.y;
+  }
+  fissureMat.opacity = 0.5 * F.lobes * Math.max(F.lungs, 0.35); fissures.forEach(l => { l.visible = F.lobes > 0.01; });
+  const hid = hover && hover.id, sid = S.select && S.select.kind === 'structure' ? S.select.id : null;
+  const em = (id, base) => base + (hid === id ? 0.6 : 0) + (sid === id ? 0.35 + 0.5 * selPulse : 0);
+  mats.trachea.opacity = 0.95 * F.trachea; gTrachea.visible = F.trachea > 0.01; mats.trachea.emissiveIntensity = em('trachea', 0.05 + scanA * 0.2);
+  mats.main.opacity = 0.93 * F.bronchi; gMain.visible = F.bronchi > 0.01; mats.main.emissiveIntensity = em('main', 0.05 + scanA * 0.25);
+  mats.tree.opacity = 0.85 * F.bronchi; gTree.visible = F.bronchi > 0.01; mats.tree.emissiveIntensity = em('tree', 0.05 + scanA * 0.45);
+  mats.heart.opacity = 0.22 * F.heart + (hid === 'heart' ? 0.12 : 0); heartG.visible = F.heart > 0.01; mats.heart.emissiveIntensity = em('heart', 0.15);
+  mats.ribs.opacity = 0.55 * F.ribs; ribsG.visible = F.ribs > 0.01; mats.ribs.emissiveIntensity = em('ribs', 0.12);
+  mats.spine.opacity = 0.55 * F.spine; spineG.visible = F.spine > 0.01; mats.spine.emissiveIntensity = em('spine', 0.12);
+
+  stepTween(now);
+  controls.autoRotate = S.autoRotate && !tw && now - lastInteract > 2500;
+  controls.update();
+
+  // overlays
+  const dir = curDir();
+  const lat = Math.abs(dir.z) > 0.5 ? 1 : 0;
+  project(V(-1.75, 1.55 + root.position.y, 0), mR).z; mR.style.opacity = lat * (dir.z > 0 ? 1 : 1);
+  project(V(1.75, 1.55 + root.position.y, 0), mL); mL.style.opacity = lat;
+  if (fa > 0.2) {
+    tmp.copy(fw).project(camera);
+    const x = (tmp.x * 0.5 + 0.5) * innerWidth, y = (-tmp.y * 0.5 + 0.5) * innerHeight, left = x < innerWidth / 2;
+    fl.style.flexDirection = left ? 'row-reverse' : 'row';
+    fl.style.left = x + 'px'; fl.style.top = y + 'px';
+    fl.style.transform = left ? 'translate(calc(-100% + 3.5px), -50%)' : 'translate(-3.5px, -50%)';
+    fl.style.opacity = Math.min(1, fa * 1.2);
+  } else fl.style.opacity = 0;
+  const qk = camera.quaternion.toArray().map(v => v.toFixed(3)).join();
+  if (qk !== lastQ) {
+    lastQ = qk;
+    const qi = camera.quaternion.clone().invert();
+    gz.innerHTML = AX.map(a => { const v = a.v.clone().applyQuaternion(qi), x = v.x * 25, y = -v.y * 25;
+      return `<line x1="0" y1="0" x2="${-x}" y2="${-y}" stroke="${a.c}" stroke-opacity="0.3" stroke-width="1.5"></line><text x="${-x * 1.32}" y="${-y * 1.32 + 3.5}" fill="${a.c}" fill-opacity="0.45" font-size="9" font-family="IBM Plex Mono, monospace" text-anchor="middle">${a.n}</text><line x1="0" y1="0" x2="${x}" y2="${y}" stroke="${a.c}" stroke-width="2"></line><text x="${x * 1.32}" y="${y * 1.32 + 3.5}" fill="${a.c}" font-size="10" font-weight="600" font-family="IBM Plex Mono, monospace" text-anchor="middle">${a.p}</text>`; }).join('') + '<circle r="2.5" fill="#dfe6e9"></circle>';
+    const ang = Math.atan2(dir.x, dir.z) * 180 / Math.PI;
+    const name = dir.y > 0.8 ? 'top' : dir.y < -0.8 ? 'bottom' : Math.abs(ang) <= 45 ? 'front' : ang > 45 && ang <= 135 ? 'left' : ang < -45 && ang >= -135 ? 'right' : 'back';
+    if (name !== lastName) { lastName = name; vname.textContent = name.toUpperCase(); parent.postMessage({ type: 'pneumoscan-lung-view', name }, '*'); }
+  }
+  renderer.render(scene, camera);
+  if (!loadingGone) { const l = document.getElementById('loading'); l && l.remove(); loadingGone = true; }
+}
+renderer.setAnimationLoop(frame);
+frame();
+setInterval(() => { if (performance.now() - last > 120) frame(); }, 33);
+</script>
+</body>
+</html>
