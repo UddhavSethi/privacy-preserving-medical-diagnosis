@@ -1,0 +1,14 @@
+{
+  "checkpoint": "outputs/checkpoints/ablation/secagg_seed42.pt",
+  "output_name": "fedavg_secagg",
+  "deferral_threshold": 0.6906569600105286,
+  "target_defer_fraction": 0.1,
+  "ood_thresholds": {
+    "A": -0.025973973836253217,
+    "B": -0.02849859841145641,
+    "C": -0.03488481294511053
+  },
+  "target_flag_fraction": 0.05,
+  "ood_seed": 42,
+  "num_mc_passes": 20
+}

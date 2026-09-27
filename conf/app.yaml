@@ -36,6 +36,12 @@ ood_detector:
   target_flag_fraction: 0.05 # matches OPT-5's placeholder (conf/experiment/ood.yaml)
   detector_seed: 42
 
+# PneumoScan redesign (docs/pneumoscan_redesign_plan.md, owner-approved
+# decision 3): the ONLY configuration the redesigned UI runs -- no model
+# selector anywhere in it. Read by app/streamlit_app.py in place of the
+# pre-redesign DEFAULT_CONFIG_KEY + Advanced-panel selectbox.
+active_configuration: fedavg_secagg
+
 # Real trained configurations only (CLAUDE.md's own governance: never expose an
 # option the backend doesn't actually support) — every entry below has a real
 # checkpoint on disk from Stage 21's ablation campaign, seed 42 (matching
@@ -86,6 +92,43 @@ configurations:
     checkpoint: outputs/checkpoints/ablation/secagg_seed42.pt
     description: "No Differential Privacy, but the server never sees an individual hospital's update."
     privacy_preserving: false
+    # Decision policy (D1, docs/pneumoscan_redesign_plan.md Phase 1A; derived
+    # via scripts/derive_app_decision_policy.py, real validation-set run,
+    # same methodology as docs/adr1_groupnorm_fallback.md sections 10/17).
+    # decision_threshold: best-F1 point on the 17-point 0.10-0.90 sweep
+    # (F1 0.638 at 0.55 vs. 0.624 at the naive 0.5 default).
+    # temperature: fit on val (T=1.1283) -- softening, i.e. this checkpoint
+    # is measurably overconfident pre-calibration (same direction as the
+    # default fedavg_no_dp checkpoint, opposite of round 9's own mild
+    # sharpening -- calibration direction is genuinely checkpoint-specific,
+    # not a fixed property, matching this project's own prior finding).
+    # abstention_half_width: real finding, not the target itself --
+    # this checkpoint's predictive distribution clusters much more heavily
+    # around the decision boundary than round 9's fine-tuned checkpoint does
+    # (895+832 of 4844 val examples fall in the calibrated [0.5,0.7) range
+    # alone). Every tested half-width in the standard sweep
+    # {0.05,0.08,0.10,0.12,0.15,0.20} overshoots the project's own ~10%
+    # deferral-target convention (DG-10) -- 0.05 (the smallest tested) is
+    # the closest available point, but its REAL abstain rate is ~21.0%, not
+    # ~10%. Kept the same fixed sweep set as round 9's own methodology
+    # (section 10.4) rather than extending it ad hoc for this checkpoint
+    # alone, to avoid the appearance of choosing whichever range produces a
+    # nicer-looking number -- see
+    # outputs/results/fedavg_secagg_threshold_calibration_analysis.json for
+    # the full sweep.
+    decision_threshold: 0.55
+    temperature: 1.1283
+    abstention_half_width: 0.05
+    # D2 (docs/pneumoscan_redesign_plan.md Phase 1A; precomputed via
+    # scripts/precompute_app_deferral_ood.py, real validation-set run):
+    # deferral threshold + the 3 per-hospital OOD IsolationForest models
+    # (outputs/app_artifacts/fedavg_secagg/, committed -- small, unlike the
+    # 576MB feature cache calibrate_deferral_threshold/build_ood_detectors
+    # need to compute these live, which Streamlit Cloud never has). This
+    # gives the public deployment real "How sure is the AI"/"Image check"
+    # values instead of permanently "Not available" there.
+    deferral_threshold: 0.6906569600105286
+    ood_artifacts_dir: outputs/app_artifacts/fedavg_secagg
   - key: centralized
     label: "Centralized (privacy-free ceiling — comparison only)"
     checkpoint: outputs/checkpoints/centralized_baseline/natural_seed42.pt
