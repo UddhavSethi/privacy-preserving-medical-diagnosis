@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body { margin: 0; background: #f4f6f7; color: #14191d; font-family: "IBM Plex Sans", Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+a { color: #0f7c83; } a:hover { color: #0a5c61; }
+*, *::before, *::after { box-sizing: border-box; }
+input[type=range] { accent-color: #3cb1b8; }
+button { font-family: inherit; }
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column;">
+
+  <header style="position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,0.86); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid #e3e7ea;">
+    <div style="max-width: 1440px; margin: 0 auto; padding: 10px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="width: 32px; height: 32px; border-radius: 8px; background: #0f7c83; display: flex; align-items: center; justify-content: center; gap: 3px;">
+          <div style="width: 8px; height: 15px; border-radius: 5px 3px 4px 5px; background: #ffffff;"></div>
+          <div style="width: 8px; height: 15px; border-radius: 3px 5px 5px 4px; background: #ffffff; opacity: 0.8;"></div>
+        </div>
+        <div style="display: flex; flex-direction: column;">
+          <div style="font-size: 16px; font-weight: 600; letter-spacing: -0.01em;">PneumoScan</div>
+          <div style="font-size: 12px; color: #5b656d;">AI-assisted chest X-ray screening</div>
+        </div>
+      </div>
+      <nav style="display: flex; flex-wrap: wrap; gap: 2px; flex: 1 1 auto;">
+        <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="4">
+          <button onClick="{{ n.onClick }}" style="border: 0; background: {{ n.bg }}; color: {{ n.fg }}; font-size: 14px; font-weight: 500; padding: 9px 14px; min-height: 40px; white-space: nowrap; border-radius: 8px; cursor: pointer; transition: background .15s, color .15s;" style-hover="background: #eef2f3;">{{ n.label }}</button>
+        </sc-for>
+      </nav>
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+        <div style="display: flex; padding: 3px; gap: 2px; background: #eef1f2; border-radius: 9px;">
+          <button onClick="{{ setClinician }}" style="border: 0; border-radius: 7px; padding: 7px 12px; min-height: 34px; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; background: {{ clinBg }}; color: {{ clinFg }}; box-shadow: {{ clinShadow }}; transition: all .15s;">Clinician mode</button>
+          <button onClick="{{ setPatient }}" style="border: 0; border-radius: 7px; padding: 7px 12px; min-height: 34px; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; background: {{ patBg }}; color: {{ patFg }}; box-shadow: {{ patShadow }}; transition: all .15s;">Patient mode</button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; padding-left: 10px; border-left: 1px solid #e3e7ea;">
+          <div style="width: 30px; height: 30px; border-radius: 50%; background: #e4f1f1; color: #0f7c83; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600;">{{ modeInitial }}</div>
+          <div style="display: flex; flex-direction: column;">
+            <span style="font-size: 12px; font-weight: 500;">{{ modeUser }}</span>
+            <span style="font-size: 11px; color: #5b656d;">Local session</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main style="flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: 22px 24px 48px; display: flex; flex-direction: column; gap: 18px;">
+
+    <sc-if value="{{ isScreening }}" hint-placeholder-val="{{ true }}">
+      <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.015em;">{{ pageTitle }}</h1>
+          <div style="font-size: 14px; color: #5b656d;">{{ pageSub }}</div>
+        </div>
+        <sc-if value="{{ hasImage }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ startOver }}" style="border: 1px solid #d8dee2; background: #ffffff; color: #14191d; font-size: 13px; font-weight: 500; padding: 9px 14px; min-height: 40px; border-radius: 8px; cursor: pointer;" style-hover="background: #eef2f3;">Start a new screening</button>
+        </sc-if>
+      </div>
+
+      <div style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 14px 18px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0;">
+        <sc-for list="{{ steps }}" as="s" hint-placeholder-count="5">
+          <div style="display: flex; flex-direction: column; gap: 8px; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="flex: none; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; background: {{ s.bg }}; color: {{ s.fg }}; border: {{ s.border }}; transition: all .25s;">{{ s.mark }}</div>
+              <div style="flex: 1; height: 2px; border-radius: 1px; margin-right: 8px; background: {{ s.line }}; transition: background .3s;"></div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 1px; padding-right: 8px;">
+              <span style="font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #7a848b;">{{ s.n }}</span>
+              <span style="font-size: 13.5px; font-weight: 500; color: {{ s.labelColor }};">{{ s.label }}</span>
+              <span style="font-size: 12px; color: {{ s.subColor }};">{{ s.sub }}</span>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;">
+
+        <aside style="flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+          <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: #5b656d;">Study</h2>
+              <span style="font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: {{ statusBg }}; color: {{ statusFg }};">{{ statusLabel }}</span>
+            </div>
+            <div style="display: flex; flex-direction: column;">
+              <sc-for list="{{ studyRows }}" as="r" hint-placeholder-count="6">
+                <div style="display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid #f0f2f3; font-size: 13px;">
+                  <span style="color: #5b656d; flex: none;">{{ r.k }}</span>
+                  <span style="font-weight: 500; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: {{ r.font }};">{{ r.v }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="font-size: 12px; line-height: 1.5; color: #5b656d; text-wrap: pretty;">No patient identifiers are collected. Nothing is saved after this session.</div>
+          </section>
+
+          <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: #5b656d;">Image check</h2>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 9px;">
+              <sc-for list="{{ qualityRows }}" as="q" hint-placeholder-count="4">
+                <div style="display: flex; align-items: center; gap: 10px; font-size: 13px;">
+                  <div style="flex: none; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; background: {{ q.bg }}; color: {{ q.fg }}; transition: all .2s;">{{ q.icon }}</div>
+                  <span style="flex: 1; min-width: 0;">{{ q.label }}</span>
+                  <span style="color: #5b656d; font-family: 'IBM Plex Mono', monospace; font-size: 12px; text-align: right;">{{ q.value }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </section>
+        </aside>
+
+        <section style="flex: 3 1 520px; min-width: 0; background: #0e1215; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; position: {{ vPos }}; inset: {{ vInset }}; z-index: {{ vZ }}; border-radius: {{ vRadius }};">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #222a30;">
+            <div style="display: flex; padding: 3px; gap: 2px; background: #182026; border-radius: 8px;">
+              <sc-for list="{{ viewModes }}" as="v" hint-placeholder-count="3">
+                <button onClick="{{ v.onClick }}" style="border: 0; border-radius: 6px; padding: 7px 13px; min-height: 34px; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; background: {{ v.bg }}; color: {{ v.fg }}; opacity: {{ v.op }}; transition: all .15s;">{{ v.label }}</button>
+              </sc-for>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px;">
+              <button onClick="{{ zoomOut }}" title="Zoom out" style="border: 1px solid #2a343b; background: transparent; color: #dfe6e9; width: 36px; height: 36px; border-radius: 7px; font-size: 18px; cursor: pointer;" style-hover="background: #1a2228;">−</button>
+              <div style="min-width: 54px; text-align: center; font: 500 12px 'IBM Plex Mono', monospace; color: #c9d1d5;">{{ zoomLabel }}</div>
+              <button onClick="{{ zoomIn }}" title="Zoom in" style="border: 1px solid #2a343b; background: transparent; color: #dfe6e9; width: 36px; height: 36px; border-radius: 7px; font-size: 18px; cursor: pointer;" style-hover="background: #1a2228;">+</button>
+              <div style="width: 1px; height: 22px; background: #2a343b; margin: 0 4px;"></div>
+              <button onClick="{{ fit }}" style="border: 1px solid #2a343b; background: transparent; color: #dfe6e9; padding: 0 11px; height: 36px; border-radius: 7px; font-size: 13px; cursor: pointer;" style-hover="background: #1a2228;">Fit</button>
+              <button onClick="{{ resetView }}" style="border: 1px solid #2a343b; background: transparent; color: #dfe6e9; padding: 0 11px; height: 36px; border-radius: 7px; font-size: 13px; cursor: pointer;" style-hover="background: #1a2228;">Reset</button>
+              <button onClick="{{ toggleInvert }}" style="border: 1px solid {{ invBorder }}; background: {{ invBg }}; color: #dfe6e9; padding: 0 11px; height: 36px; border-radius: 7px; font-size: 13px; cursor: pointer;">Invert</button>
+              <button onClick="{{ toggleMax }}" style="border: 1px solid #2a343b; background: transparent; color: #dfe6e9; padding: 0 11px; height: 36px; border-radius: 7px; font-size: 13px; cursor: pointer;" style-hover="background: #1a2228;">{{ maxLabel }}</button>
+            </div>
+          </div>
+
+          <div ref="{{ vpRef }}" onPointerDown="{{ onPointerDown }}" onPointerMove="{{ onPointerMove }}" onPointerUp="{{ onPointerUp }}" onPointerLeave="{{ onPointerLeave }}" onDragOver="{{ onDragOver }}" onDragLeave="{{ onDragLeave }}" onDrop="{{ onDrop }}" style="position: relative; height: {{ vpHeight }}; min-height: 380px; background: #06080a; overflow: hidden; touch-action: none; cursor: {{ vpCursor }}; user-select: none;">
+            <sc-if value="{{ hasImage }}" hint-placeholder-val="{{ false }}">
+              <div ref="{{ stageRef }}" style="position: absolute; left: 50%; top: 50%; width: {{ stageW }}; height: {{ stageH }}; transform: {{ stageTransform }}; transform-origin: center; transition: {{ stageTransition }};">
+                <div role="img" aria-label="Chest radiograph" style="position: absolute; inset: 0; width: 100%; height: 100%; display: block; filter: {{ imgFilter }}; transition: filter .2s; pointer-events: none; background-image: {{ imgBg }}; background-size: 100% 100%; background-repeat: no-repeat;"></div>
+                <div style="position: absolute; inset: 0; pointer-events: none; opacity: {{ heatOpacity }}; clip-path: {{ heatClip }}; transition: opacity .9s ease;">
+                  <div role="img" aria-label="" style="width: 100%; height: 100%; display: block; background-image: {{ heatBg }}; background-size: 100% 100%; background-repeat: no-repeat;"></div>
+                </div>
+                <sc-if value="{{ isCompare }}" hint-placeholder-val="{{ false }}">
+                  <div style="position: absolute; top: 0; bottom: 0; left: {{ comparePct }}; width: 0; pointer-events: none;">
+                    <div style="position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: #ffffff; box-shadow: 0 0 0 1px rgba(0,0,0,0.3);"></div>
+                    <div onPointerDown="{{ onHandleDown }}" style="position: absolute; top: 50%; left: -18px; width: 36px; height: 36px; margin-top: -18px; border-radius: 50%; background: #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; gap: 4px; cursor: ew-resize; pointer-events: auto; font-size: 12px; color: #14191d;">
+                      <span>‹</span><span>›</span>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ isScanning }}" hint-placeholder-val="{{ false }}">
+                  <div style="position: absolute; left: 0; right: 0; top: 0; height: {{ scanTop }}; background: rgba(60,177,184,0.07); pointer-events: none;"></div>
+                  <div style="position: absolute; left: 0; right: 0; top: {{ scanTop }}; height: 2px; background: #56c7cd; box-shadow: 0 0 18px 4px rgba(86,199,205,0.55); pointer-events: none;"></div>
+                </sc-if>
+              </div>
+              <div style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); pointer-events: none; font: 600 18px 'IBM Plex Mono', monospace; color: #e9eef0; text-shadow: 0 1px 3px #000;">R</div>
+              <div style="position: absolute; right: 14px; top: 50%; transform: translateY(-50%); pointer-events: none; font: 600 18px 'IBM Plex Mono', monospace; color: #e9eef0; text-shadow: 0 1px 3px #000;">L</div>
+              <div style="position: absolute; left: 14px; top: 12px; pointer-events: none; display: flex; flex-direction: column; gap: 2px; font: 11.5px 'IBM Plex Mono', monospace; color: #b9c3c8; text-shadow: 0 1px 2px #000;">
+                <span style="color: #eef3f5; font-weight: 500;">PA chest radiograph</span>
+                <span>{{ metaId }}</span>
+                <span>{{ metaDims }}</span>
+                <span style="color: {{ metaStatusColor }};">{{ metaStatus }}</span>
+              </div>
+              <sc-if value="{{ isCompare }}" hint-placeholder-val="{{ false }}">
+                <div style="position: absolute; top: 12px; right: 14px; pointer-events: none; display: flex; gap: 6px; font-size: 11.5px; font-weight: 500;">
+                  <span style="padding: 3px 8px; border-radius: 5px; background: rgba(255,255,255,0.12); color: #eef3f5;">Left: original</span>
+                  <span style="padding: 3px 8px; border-radius: 5px; background: rgba(255,255,255,0.12); color: #eef3f5;">Right: AI highlight</span>
+                </div>
+              </sc-if>
+              <div style="position: absolute; left: 12px; bottom: 12px; pointer-events: none; display: flex; gap: 12px; padding: 6px 10px; border-radius: 6px; background: rgba(10,13,15,0.78); font: 11.5px 'IBM Plex Mono', monospace; color: #c9d1d5; opacity: {{ hoverOpacity }}; transition: opacity .15s;">
+                <span>{{ hoverPos }}</span>
+                <span style="color: #f0b35a;">{{ hoverCam }}</span>
+              </div>
+              <div style="position: absolute; right: 12px; bottom: 12px; pointer-events: none; font-size: 11.5px; color: #7f8c92;">Scroll to zoom · drag to pan</div>
+            </sc-if>
+
+            <sc-if value="{{ noImage }}" hint-placeholder-val="{{ true }}">
+              <div style="position: absolute; inset: 16px; border: 1.5px dashed {{ dropBorder }}; border-radius: 10px; background: {{ dropBg }}; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; text-align: center; transition: all .15s;">
+                <div style="width: 56px; height: 64px; border-radius: 8px; border: 1.5px solid #3a474f; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                  <div style="width: 13px; height: 28px; border-radius: 7px 4px 5px 7px; background: #3a474f;"></div>
+                  <div style="width: 13px; height: 28px; border-radius: 4px 7px 7px 5px; background: #3a474f;"></div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <div style="font-size: 20px; font-weight: 600; color: #eef3f5; letter-spacing: -0.01em;">{{ dropTitle }}</div>
+                  <div style="font-size: 14px; color: #9aa7ad;">JPEG or PNG · a frontal (PA) chest X-ray works best</div>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;">
+                  <button onClick="{{ chooseFile }}" style="border: 0; background: #0f7c83; color: #ffffff; font-size: 15px; font-weight: 600; padding: 12px 20px; min-height: 46px; border-radius: 9px; cursor: pointer;" style-hover="background: #0d6d73;">Choose X-ray file</button>
+                  <button onClick="{{ useSample }}" style="border: 1px solid #34414a; background: transparent; color: #e3eaed; font-size: 15px; font-weight: 500; padding: 12px 18px; min-height: 46px; border-radius: 9px; cursor: pointer;" style-hover="background: #161d22;">Use sample X-ray</button>
+                </div>
+                <sc-if value="{{ hasError }}" hint-placeholder-val="{{ false }}">
+                  <div style="max-width: 420px; font-size: 13px; line-height: 1.5; color: #f3c98a; background: rgba(154,91,11,0.18); border: 1px solid rgba(240,179,90,0.35); padding: 9px 12px; border-radius: 8px;">{{ errText }}</div>
+                </sc-if>
+                <div style="font-size: 11.5px; color: #6f7d84;">Sample: CC0 radiograph by Mikael Häggström, Wikimedia Commons</div>
+              </div>
+            </sc-if>
+            <input ref="{{ fileRef }}" type="file" accept="image/png,image/jpeg,.dcm" onChange="{{ onFile }}" style="display: none;">
+          </div>
+
+          <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 12px 14px; border-top: 1px solid #222a30; opacity: {{ controlsOpacity }}; transition: opacity .3s;">
+            <button onClick="{{ toggleCam }}" style="display: flex; align-items: center; gap: 9px; border: 0; background: transparent; padding: 6px 2px; min-height: 36px; cursor: pointer;">
+              <span style="position: relative; width: 34px; height: 20px; border-radius: 10px; background: {{ camTrack }}; transition: background .2s;">
+                <span style="position: absolute; top: 3px; left: {{ camKnob }}; width: 14px; height: 14px; border-radius: 50%; background: #ffffff; transition: left .2s;"></span>
+              </span>
+              <span style="font-size: 13px; font-weight: 500; color: #dfe6e9;">AI highlight</span>
+            </button>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px 20px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9aa7ad;">
+                <span>Opacity</span>
+                <input type="range" min="0" max="100" value="{{ opacity }}" onChange="{{ onOpacity }}" style="width: 110px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; color: #dfe6e9; min-width: 34px;">{{ opacityLabel }}</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9aa7ad;">
+                <span>Highlight area</span>
+                <input type="range" min="0" max="100" value="{{ intensity }}" onChange="{{ onIntensity }}" style="width: 110px;">
+                <span style="font-family: 'IBM Plex Mono', monospace; color: #dfe6e9; min-width: 34px;">{{ intensityLabel }}</span>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <aside style="flex: 1.4 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+
+          <sc-if value="{{ phaseUpload }}" hint-placeholder-val="{{ true }}">
+            <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 16px;">
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <h2 style="margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em;">{{ startTitle }}</h2>
+                <p style="margin: 0; font-size: 14px; line-height: 1.55; color: #4c565d; text-wrap: pretty;">{{ startBody }}</p>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <sc-for list="{{ startPoints }}" as="p" hint-placeholder-count="3">
+                  <div style="display: flex; gap: 12px; align-items: flex-start;">
+                    <div style="flex: none; width: 24px; height: 24px; border-radius: 6px; background: #e4f1f1; color: #0f7c83; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600;">{{ p.n }}</div>
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                      <span style="font-size: 14px; font-weight: 500;">{{ p.title }}</span>
+                      <span style="font-size: 13px; line-height: 1.45; color: #5b656d;">{{ p.text }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </section>
+          </sc-if>
+
+          <sc-if value="{{ phaseQuality }}" hint-placeholder-val="{{ false }}">
+            <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 16px;">
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <h2 style="margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em;">{{ readyTitle }}</h2>
+                <p style="margin: 0; font-size: 14px; line-height: 1.55; color: #4c565d; text-wrap: pretty;">{{ readyBody }}</p>
+              </div>
+              <button onClick="{{ runScreening }}" disabled="{{ runDisabled }}" style="border: 0; background: #0f7c83; color: #ffffff; font-size: 15px; font-weight: 600; padding: 13px 18px; min-height: 48px; border-radius: 9px; cursor: pointer; opacity: {{ runOpacity }}; transition: opacity .2s;" style-hover="background: #0d6d73;">Analyze X-ray</button>
+            </section>
+          </sc-if>
+
+          <sc-if value="{{ phaseAnalyzing }}" hint-placeholder-val="{{ false }}">
+            <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 16px;">
+              <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+                <h2 style="margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em;">{{ analyzingTitle }}</h2>
+                <span style="font: 500 13px 'IBM Plex Mono', monospace; color: #0f7c83;">{{ progressLabel }}</span>
+              </div>
+              <div style="height: 4px; border-radius: 2px; background: #eef1f2; overflow: hidden;">
+                <div style="height: 100%; width: {{ progressPct }}; background: #0f7c83; border-radius: 2px; transition: width .1s linear;"></div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 12px;">
+                <sc-for list="{{ subSteps }}" as="s" hint-placeholder-count="4">
+                  <div style="display: flex; gap: 12px; align-items: flex-start;">
+                    <div style="flex: none; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; background: {{ s.bg }}; color: #ffffff; border: {{ s.border }}; transition: all .2s;">{{ s.mark }}</div>
+                    <div style="display: flex; flex-direction: column; gap: 1px;">
+                      <span style="font-size: 14px; font-weight: 500; color: {{ s.color }};">{{ s.label }}</span>
+                      <span style="font-size: 12.5px; color: #5b656d;">{{ s.detail }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </section>
+          </sc-if>
+
+          <sc-if value="{{ showClinicianResult }}" hint-placeholder-val="{{ false }}">
+            <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; opacity: {{ revealOpacity }}; transform: {{ revealTransform }}; transition: opacity .45s ease, transform .45s ease;">
+              <div style="padding: 20px; display: flex; flex-direction: column; gap: 16px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                  <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: #5b656d;">AI result</h2>
+                  <sc-if value="{{ showSampleTag }}" hint-placeholder-val="{{ true }}">
+                    <span title="Sample values until connected to the screening service" style="font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; border: 1px solid #d8dee2; color: #5b656d;">Sample output</span>
+                  </sc-if>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                  <div style="font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; text-wrap: pretty;">{{ findingTitle }}</div>
+                  <div style="display: flex; align-items: baseline; gap: 8px;">
+                    <span style="font: 500 32px 'IBM Plex Mono', monospace; letter-spacing: -0.03em;">{{ confPct }}</span>
+                    <span style="font-size: 14px; color: #5b656d;">{{ confWord }}</span>
+                  </div>
+                  <div style="height: 6px; border-radius: 3px; background: #eef1f2; overflow: hidden;">
+                    <div style="height: 100%; border-radius: 3px; background: #14191d; width: {{ confBar }}; transition: width 1s cubic-bezier(.2,.7,.2,1);"></div>
+                  </div>
+                </div>
+                <sc-if value="{{ cautionOod }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size: 13.5px; line-height: 1.5; color: #5a4214; background: #fbf4e6; border: 1px solid #f0e2c6; padding: 10px 12px; border-radius: 8px; text-wrap: pretty;">This image looks different from the X-rays the AI learned from, for example an unusual scan or different equipment. Treat the result with extra caution.</div>
+                </sc-if>
+                <sc-if value="{{ abstained }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size: 13.5px; line-height: 1.5; color: #1f3d40; background: #eef7f7; border: 1px solid #d6e8e8; padding: 10px 12px; border-radius: 8px; text-wrap: pretty;">The result is too close to call, so the AI isn't giving an answer. Read this X-ray without relying on the AI.</div>
+                </sc-if>
+                <div style="display: flex; flex-direction: column;">
+                  <sc-for list="{{ resultRows }}" as="r" hint-placeholder-count="3">
+                    <div style="display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid #f0f2f3; font-size: 14px;">
+                      <span style="color: #5b656d;">{{ r.k }}</span>
+                      <span style="font-weight: 600; text-align: right; color: {{ r.c }};">{{ r.v }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="background: #f0f7f7; border-top: 1px solid #d6e8e8; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                  <span style="font-size: 15px; font-weight: 600; color: #0a5c61;">Review recommended</span>
+                  <span style="font-size: 13px; color: #3f5a5c;">The AI result is a second opinion. The decision is yours.</span>
+                </div>
+                <sc-for list="{{ nextSteps }}" as="n" hint-placeholder-count="3">
+                  <div style="display: flex; align-items: center; gap: 10px; font-size: 13.5px;">
+                    <span style="flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1px solid #c4dcdd; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: #0a5c61; background: #ffffff;">{{ n.n }}</span>
+                    <span style="flex: 1; min-width: 0; line-height: 1.4;">{{ n.text }}</span>
+                    <sc-if value="{{ n.hasAction }}" hint-placeholder-val="{{ false }}">
+                      <button onClick="{{ n.onClick }}" style="flex: none; border: 1px solid #c4dcdd; background: #ffffff; color: #0f7c83; font-size: 12.5px; font-weight: 600; padding: 6px 10px; min-height: 32px; border-radius: 7px; cursor: pointer;" style-hover="background: #e4f1f1;">{{ n.action }}</button>
+                    </sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </section>
+
+            <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; opacity: {{ revealOpacity }}; transform: {{ revealTransform2 }}; transition: opacity .55s ease .1s, transform .55s ease .1s;">
+              <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: #5b656d;">Where the AI looked</h2>
+              <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px;">
+                <button onClick="{{ viewOriginal }}" style="border: 0; padding: 0; background: transparent; cursor: pointer; display: flex; flex-direction: column; gap: 6px; text-align: left;">
+                  <div style="position: relative; width: 100%; aspect-ratio: {{ imgAspect }}; background: #06080a; border-radius: 7px; overflow: hidden;">
+                    <div role="img" aria-label="Original" style="position: absolute; inset: 0; background-image: {{ imgBg }}; background-size: 100% 100%; background-repeat: no-repeat;"></div>
+                  </div>
+                  <span style="font-size: 12px; color: #5b656d;">Original</span>
+                </button>
+                <button onClick="{{ viewOverlay }}" style="border: 0; padding: 0; background: transparent; cursor: pointer; display: flex; flex-direction: column; gap: 6px; text-align: left;">
+                  <div style="position: relative; width: 100%; aspect-ratio: {{ imgAspect }}; background: #06080a; border-radius: 7px; overflow: hidden;">
+                    <div role="img" aria-label="" style="position: absolute; inset: 0; background-image: {{ imgBg }}; background-size: 100% 100%; background-repeat: no-repeat;"></div>
+                    <div role="img" aria-label="AI highlight" style="position: absolute; inset: 0; opacity: 0.75; background-image: {{ heatBg }}; background-size: 100% 100%; background-repeat: no-repeat;"></div>
+                  </div>
+                  <span style="font-size: 12px; color: #5b656d;">AI highlight</span>
+                </button>
+              </div>
+              <sc-if value="{{ hasFocusPlain }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size: 14px; font-weight: 500;">{{ focusPlain }}</div>
+              </sc-if>
+              <p style="margin: 0; font-size: 13px; line-height: 1.55; color: #4c565d; text-wrap: pretty;">Coloured areas influenced the result most. They are not an outline of disease.</p>
+            </section>
+          </sc-if>
+
+          <sc-if value="{{ showPatientResult }}" hint-placeholder-val="{{ false }}">
+            <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; opacity: {{ revealOpacity }}; transform: {{ revealTransform }}; transition: opacity .45s ease, transform .45s ease;">
+              <div style="padding: 20px; display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                  <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: #5b656d;">Your screening result</h2>
+                  <sc-if value="{{ showSampleTag }}" hint-placeholder-val="{{ true }}">
+                    <span style="font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; border: 1px solid #d8dee2; color: #5b656d;">Sample output</span>
+                  </sc-if>
+                </div>
+                <div style="font-size: 21px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.25; text-wrap: pretty;">{{ patientHeadline }}</div>
+                <p style="margin: 0; font-size: 14.5px; line-height: 1.55; color: #3f484e; text-wrap: pretty;">{{ patientBody }}</p>
+              </div>
+              <div style="padding: 16px 20px; border-top: 1px solid #f0f2f3; display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 10px;">
+                  <span style="font-size: 15px; font-weight: 500;">How confident is the AI?</span>
+                  <span style="font-size: 16px; font-weight: 600;">{{ sureBand }}</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px;">
+                  <sc-for list="{{ sureSegs }}" as="b" hint-placeholder-count="3">
+                    <div style="display: flex; flex-direction: column; gap: 5px;">
+                      <div style="height: 8px; border-radius: 4px; background: {{ b.bg }}; transition: background .5s;"></div>
+                      <span style="font-size: 12px; color: {{ b.fg }};">{{ b.name }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+                <sc-if value="{{ deferred }}" hint-placeholder-val="{{ false }}">
+                  <div style="font-size: 13.5px; line-height: 1.5; color: #5a4214; background: #fbf4e6; padding: 9px 12px; border-radius: 8px;">The AI is unsure about this image, so it has marked it for a closer look by a professional.</div>
+                </sc-if>
+              </div>
+              <div style="padding: 16px 20px; border-top: 1px solid #f0f2f3; display: flex; flex-direction: column; gap: 10px;">
+                <span style="font-size: 15px; font-weight: 500;">{{ whyTitle }}</span>
+                <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px;">
+                  <div style="position: relative; width: 100%; aspect-ratio: {{ imgAspect }}; background: #06080a; border-radius: 7px; overflow: hidden;">
+                    <div role="img" aria-label="Your X-ray" style="position: absolute; inset: 0; width: 100%; height: 100%; display: block; background-image: {{ imgBg }}; background-size: 100% 100%; background-repeat: no-repeat;"></div>
+                  </div>
+                  <div style="position: relative; width: 100%; aspect-ratio: {{ imgAspect }}; background: #06080a; border-radius: 7px; overflow: hidden;">
+                    <div role="img" aria-label="" style="position: absolute; inset: 0; width: 100%; height: 100%; display: block; background-image: {{ imgBg }}; background-size: 100% 100%; background-repeat: no-repeat;"></div>
+                    <div role="img" aria-label="Areas the AI focused on" style="position: absolute; inset: 0; width: 100%; height: 100%; display: block; opacity: 0.75; background-image: {{ heatBg }}; background-size: 100% 100%; background-repeat: no-repeat;"></div>
+                  </div>
+                </div>
+                <p style="margin: 0; font-size: 13.5px; line-height: 1.55; color: #3f484e; text-wrap: pretty;">The coloured areas show where the AI looked most closely when making its decision. Warmer colours mean more attention. They do not show the exact location of any illness.</p>
+              </div>
+              <div style="padding: 16px 20px; border-top: 1px solid #f0f2f3; display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 15px; font-weight: 500;">Was the image suitable?</span>
+                <p style="margin: 0; font-size: 13.5px; line-height: 1.55; color: #3f484e; text-wrap: pretty;">{{ patientImageCheck }}</p>
+              </div>
+              <div style="padding: 16px 20px 18px; background: #e9f3f3; border-top: 1px solid #d6e8e8; display: flex; flex-direction: column; gap: 6px;">
+                <span style="font-size: 15px; font-weight: 600; color: #0a5c61;">What should I do?</span>
+                <p style="margin: 0; font-size: 14px; line-height: 1.55; color: #1f3d40; text-wrap: pretty;">AI screening results should be reviewed by a qualified healthcare professional. This application does not provide a medical diagnosis.</p>
+              </div>
+            </section>
+          </sc-if>
+        </aside>
+      </div>
+
+      <section ref="{{ exploreRef }}" style="display: flex; flex-direction: column; gap: 16px; margin-top: 14px;">
+        <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px;">
+          <div style="display: flex; flex-direction: column; gap: 6px; max-width: 680px;">
+            <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #0f7c83;">{{ explorerEyebrow }}</span>
+            <h2 style="margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15;">{{ explorerTitle }}</h2>
+            <p style="margin: 0; font-size: 15px; line-height: 1.55; color: #4c565d; text-wrap: pretty;">{{ explorerSub }}</p>
+          </div>
+        </div>
+
+        <div style="position: relative; height: clamp(560px, 78vh, 780px); border-radius: 16px; overflow: hidden; background: #06080a; box-shadow: 0 30px 60px -36px rgba(6,24,28,0.7);">
+          <iframe ref="{{ lungRef }}" src="lung-model.html" title="3D anatomical explorer" style="position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; opacity: {{ threeOpacity }}; transform: {{ threeTransform }}; transition: opacity .5s ease, transform .7s cubic-bezier(.2,.7,.2,1); pointer-events: {{ threePE }};"></iframe>
+
+          <div style="position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 40%, #121a1f 0%, #06080a 70%); display: flex; align-items: center; justify-content: center; padding: 72px 90px 56px; opacity: {{ xrayOpacity }}; transform: {{ xrayTransform }}; transition: opacity .5s ease, transform .7s cubic-bezier(.2,.7,.2,1); pointer-events: {{ xrayPE }};">
+            <sc-if value="{{ hasImage }}" hint-placeholder-val="{{ false }}">
+              <div style="position: relative; height: 100%; max-width: 100%; aspect-ratio: {{ imgAspect }};">
+                <div role="img" aria-label="Chest X-ray" style="position: absolute; inset: 0; border-radius: 4px; background-image: {{ imgBg }}; background-size: 100% 100%; background-repeat: no-repeat;"></div>
+                <div style="position: absolute; inset: 0; opacity: {{ xrHeatOp }}; transition: opacity .6s ease; background-image: {{ heatBg }}; background-size: 100% 100%; background-repeat: no-repeat;"></div>
+                <div style="position: absolute; left: 6%; right: 6%; top: 34.7%; border-top: 1px dashed rgba(143,208,214,0.5);"></div>
+                <div style="position: absolute; left: 6%; right: 6%; top: 57.3%; border-top: 1px dashed rgba(143,208,214,0.5);"></div>
+                <div style="position: absolute; right: calc(100% + 12px); top: 23.3%; transform: translateY(-50%); font-size: 12px; font-weight: 500; color: #9fb4ba; white-space: nowrap;">Upper</div>
+                <div style="position: absolute; right: calc(100% + 12px); top: 46%; transform: translateY(-50%); font-size: 12px; font-weight: 500; color: #9fb4ba; white-space: nowrap;">Middle</div>
+                <div style="position: absolute; right: calc(100% + 12px); top: 68.7%; transform: translateY(-50%); font-size: 12px; font-weight: 500; color: #9fb4ba; white-space: nowrap;">Lower</div>
+                <div style="position: absolute; left: 10px; top: 8px; font: 600 15px 'IBM Plex Mono', monospace; color: #e9eef0; text-shadow: 0 1px 3px #000;">R</div>
+                <div style="position: absolute; right: 10px; top: 8px; font: 600 15px 'IBM Plex Mono', monospace; color: #e9eef0; text-shadow: 0 1px 3px #000;">L</div>
+                <sc-if value="{{ xrFocus }}" hint-placeholder-val="{{ false }}">
+                  <button onClick="{{ openFocus3d }}" title="Show this region in 3D" style="position: absolute; left: {{ fzLeft }}; top: {{ fzTop }}; width: {{ fzW }}; height: {{ fzH }}; border: 1.5px solid rgba(240,179,90,0.9); border-radius: 6px; background: rgba(240,179,90,0.08); cursor: pointer; padding: 0;">
+                    <span style="position: absolute; left: -1px; bottom: calc(100% + 6px); white-space: nowrap; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #f3c98a;">AI focus · approximate</span>
+                  </button>
+                </sc-if>
+              </div>
+            </sc-if>
+            <sc-if value="{{ noImage }}" hint-placeholder-val="{{ true }}">
+              <div style="font-size: 15px; color: #9aa7ad; text-align: center; max-width: 360px; line-height: 1.5;">Add an X-ray above to see it side by side with the 3D anatomy.</div>
+            </sc-if>
+            <div style="position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 12px; color: #8fa0a7;">Illustrative anatomical mapping — not a patient-specific 3D reconstruction</div>
+          </div>
+
+          <div style="position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; padding: 3px; gap: 2px; background: rgba(12,17,20,0.74); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; border-radius: 10px;">
+            <sc-for list="{{ exSeg }}" as="g" hint-placeholder-count="2">
+              <button onClick="{{ g.onClick }}" style="border: 0; border-radius: 7px; padding: 8px 16px; min-height: 36px; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer; background: {{ g.bg }}; color: {{ g.fg }}; transition: all .2s;">{{ g.label }}</button>
+            </sc-for>
+          </div>
+
+          <sc-if value="{{ showLayersPanel }}" hint-placeholder-val="{{ true }}">
+            <div style="position: absolute; top: 16px; left: 16px; width: 200px; padding: 12px 10px 8px; background: rgba(12,17,20,0.74); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; display: flex; flex-direction: column; gap: 1px;">
+              <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #8fa0a7; padding: 0 6px 6px;">Layers</div>
+              <sc-for list="{{ layerRows }}" as="l" hint-placeholder-count="8">
+                <button onClick="{{ l.onClick }}" style="display: flex; align-items: center; gap: 10px; border: 0; background: transparent; padding: 6px; min-height: 34px; border-radius: 7px; cursor: pointer; text-align: left;" style-hover="background: rgba(255,255,255,0.06);">
+                  <span style="flex: none; width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid {{ l.box }}; background: {{ l.fill }}; color: #0b1013; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; transition: all .15s;">{{ l.mark }}</span>
+                  <span style="flex: none; width: 8px; height: 8px; border-radius: 50%; background: {{ l.swatch }};"></span>
+                  <span style="flex: 1; min-width: 0; font-size: 13px; color: #e3eaed;">{{ l.label }}</span>
+                  <span style="font-size: 11px; color: #7f8c92; white-space: nowrap;">{{ l.note }}</span>
+                </button>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ show3dPanels }}" hint-placeholder-val="{{ true }}">
+            <div style="position: absolute; top: 16px; right: 16px; width: 188px; padding: 12px; background: rgba(12,17,20,0.74); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #8fa0a7;">View</div>
+              <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px;">
+                <sc-for list="{{ viewOpts }}" as="v" hint-placeholder-count="4">
+                  <button onClick="{{ v.onClick }}" style="display: flex; align-items: center; gap: 7px; padding: 7px 8px; min-height: 34px; border-radius: 7px; border: 0; background: {{ v.bg }}; color: {{ v.fg }}; font-size: 12.5px; font-weight: 500; cursor: pointer; transition: all .15s;">
+                    <span style="flex: none; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid {{ v.ring }}; background: {{ v.dot }};"></span>
+                    <span>{{ v.label }}</span>
+                  </button>
+                </sc-for>
+              </div>
+              <div style="display: flex; gap: 4px;">
+                <button onClick="{{ exZoomOut }}" title="Zoom out" style="width: 36px; height: 34px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: #dfe6e9; border-radius: 7px; font-size: 17px; cursor: pointer;" style-hover="background: rgba(255,255,255,0.06);">−</button>
+                <button onClick="{{ exZoomIn }}" title="Zoom in" style="width: 36px; height: 34px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: #dfe6e9; border-radius: 7px; font-size: 17px; cursor: pointer;" style-hover="background: rgba(255,255,255,0.06);">+</button>
+                <button onClick="{{ exReset }}" style="flex: 1; height: 34px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: #dfe6e9; border-radius: 7px; font-size: 12.5px; font-weight: 500; cursor: pointer;" style-hover="background: rgba(255,255,255,0.06);">Reset</button>
+              </div>
+              <div style="height: 1px; background: rgba(255,255,255,0.08);"></div>
+              <button onClick="{{ toggleRot }}" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; padding: 2px 0; min-height: 30px; cursor: pointer;">
+                <span style="font-size: 12.5px; color: #dfe6e9;">Auto-rotate</span><span style="position: relative; flex: none; width: 34px; height: 20px; border-radius: 10px; background: {{ rotTrack }}; transition: background .2s;"><span style="position: absolute; top: 3px; left: {{ rotKnob }}; width: 14px; height: 14px; border-radius: 50%; background: #ffffff; transition: left .2s;"></span></span>
+              </button>
+              <button onClick="{{ toggleBreath }}" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: transparent; padding: 2px 0; min-height: 30px; cursor: pointer;">
+                <span style="font-size: 12.5px; color: #dfe6e9;">Breathing</span><span style="position: relative; flex: none; width: 34px; height: 20px; border-radius: 10px; background: {{ brTrack }}; transition: background .2s;"><span style="position: absolute; top: 3px; left: {{ brKnob }}; width: 14px; height: 14px; border-radius: 50%; background: #ffffff; transition: left .2s;"></span></span>
+              </button>
+            </div>
+
+            <div style="position: absolute; right: 16px; top: 300px; width: 244px; max-height: calc(100% - 300px - 148px); overflow-y: auto; padding: 14px; background: rgba(12,17,20,0.74); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; display: flex; flex-direction: column; gap: 10px; opacity: {{ infoOpacity }}; transform: {{ infoTransform }}; pointer-events: {{ infoPE }}; transition: opacity .28s ease, transform .28s ease;">
+              <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                  <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #7fd3d8;">{{ infoTitle }}</span>
+                  <span style="font-size: 17px; font-weight: 600; color: #ffffff;">{{ infoSub }}</span>
+                </div>
+                <button onClick="{{ closeInfo }}" title="Close" style="flex: none; width: 28px; height: 28px; border: 0; border-radius: 6px; background: rgba(255,255,255,0.06); color: #b9c3c8; font-size: 15px; cursor: pointer;">×</button>
+              </div>
+              <sc-if value="{{ infoHasFocus }}" hint-placeholder-val="{{ false }}">
+                <div style="display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; background: rgba(224,160,64,0.12); border: 1px solid rgba(224,160,64,0.32);">
+                  <span style="flex: none; width: 8px; height: 8px; border-radius: 50%; background: #ffc27a; box-shadow: 0 0 8px 2px rgba(255,170,80,0.6);"></span>
+                  <span style="display: flex; flex-direction: column; gap: 1px;">
+                    <span style="font-size: 12.5px; font-weight: 600; color: #f6cf94;">AI focus</span>
+                    <span style="font-size: 11.5px; color: #d9c6a5;">Approximate region influencing the result</span>
+                  </span>
+                </div>
+              </sc-if>
+              <sc-for list="{{ infoRows }}" as="r" hint-placeholder-count="0">
+                <div style="display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding-top: 7px; border-top: 1px solid rgba(255,255,255,0.07);">
+                  <span style="color: #9aa7ad;">{{ r.k }}</span>
+                  <span style="color: #ffffff; font-weight: 600; font-family: 'IBM Plex Mono', monospace;">{{ r.v }}</span>
+                </div>
+              </sc-for>
+              <p style="margin: 0; font-size: 12.5px; line-height: 1.5; color: #b9c3c8; text-wrap: pretty; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;">{{ infoText }}</p>
+            </div>
+
+            <sc-if value="{{ showRing }}" hint-placeholder-val="{{ false }}">
+              <div style="position: absolute; left: 16px; bottom: 16px; padding: 12px 16px 12px 12px; background: rgba(12,17,20,0.74); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; display: flex; align-items: center; gap: 14px;">
+                <div style="position: relative; flex: none; width: 66px; height: 66px; border-radius: 50%; background: conic-gradient(#56c7cd {{ confDeg }}, rgba(255,255,255,0.08) 0);">
+                  <div style="position: absolute; inset: 5px; border-radius: 50%; background: #0c1215; display: flex; align-items: center; justify-content: center; font: 500 16px 'IBM Plex Mono', monospace; color: #ffffff;">{{ confPct }}</div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 3px;">
+                  <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #8fa0a7;">AI confidence</span>
+                  <span style="font-size: 14px; font-weight: 600; color: #eef3f5;">{{ ringFinding }}</span>
+                  <span style="font-size: 12px; color: #9aa7ad;">{{ ringCertainty }}</span>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ showPatientNote }}" hint-placeholder-val="{{ false }}">
+              <div style="position: absolute; left: 16px; bottom: 16px; max-width: 320px; padding: 12px 14px; background: rgba(12,17,20,0.74); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; display: flex; flex-direction: column; gap: 4px;">
+                <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #8fa0a7;">What the AI noticed</span>
+                <span style="font-size: 14px; line-height: 1.45; color: #eef3f5; text-wrap: pretty;">{{ patientNote }}</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{ showHints }}" hint-placeholder-val="{{ true }}">
+              <div style="position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); pointer-events: none; font-size: 12px; color: #7f8c92; white-space: nowrap;">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
+            </sc-if>
+          </sc-if>
+
+          <sc-if value="{{ scanActive }}" hint-placeholder-val="{{ false }}">
+            <div style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); width: 300px; padding: 14px 16px; background: rgba(12,17,20,0.74); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; display: flex; flex-direction: column; gap: 9px;">
+              <sc-for list="{{ scanStages }}" as="st" hint-placeholder-count="3">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="flex: none; width: 8px; height: 8px; border-radius: 50%; background: {{ st.dot }}; box-shadow: {{ st.glow }}; transition: all .3s;"></span>
+                  <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: {{ st.fg }}; transition: color .3s;">{{ st.label }}</span>
+                </div>
+              </sc-for>
+              <div style="height: 3px; border-radius: 2px; background: rgba(255,255,255,0.08); overflow: hidden;">
+                <div style="height: 100%; width: {{ progressPct }}; background: #56c7cd; transition: width .1s linear;"></div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px;">
+          <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #5b656d; margin-right: 6px;">Explore anatomy</span>
+          <sc-for list="{{ exChips }}" as="z" hint-placeholder-count="3">
+            <button onClick="{{ z.onClick }}" style="display: flex; align-items: center; gap: 10px; border: 1px solid {{ z.border }}; background: {{ z.bg }}; color: {{ z.fg }}; font-size: 14px; font-weight: 500; padding: 8px 16px 8px 13px; min-height: 44px; border-radius: 999px; cursor: pointer; transition: all .2s;" style-hover="border-color: #0f7c83;">
+              <span style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
+                <span style="width: 10px; height: 4px; border-radius: 2px; background: {{ z.s1 }};"></span>
+                <span style="width: 14px; height: 4px; border-radius: 2px; background: {{ z.s2 }};"></span>
+                <span style="width: 16px; height: 4px; border-radius: 2px; background: {{ z.s3 }};"></span>
+              </span>
+              <span>{{ z.label }}</span>
+              <sc-if value="{{ z.hasTag }}" hint-placeholder-val="{{ false }}">
+                <span style="font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: #fbf0dc; color: #8a520a;">AI focus</span>
+              </sc-if>
+            </button>
+          </sc-for>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{ isStudies }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.015em;">Previous studies</h1>
+        <div style="font-size: 14px; color: #5b656d;">Screenings from this device</div>
+      </div>
+      <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; overflow: hidden;">
+        <div style="display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; padding: 12px 20px; background: #f7f9f9; border-bottom: 1px solid #e9edef; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #5b656d;">
+          <span>Study</span><span>Date</span><span>AI finding</span><span>Review status</span>
+        </div>
+        <div style="padding: 64px 24px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center;">
+          <div style="width: 44px; height: 52px; border-radius: 7px; border: 1.5px solid #cfd8dc;"></div>
+          <div style="font-size: 18px; font-weight: 600;">No previous studies</div>
+          <div style="max-width: 440px; font-size: 14px; line-height: 1.55; color: #5b656d; text-wrap: pretty;">This prototype doesn't store images, results, or patient details. Each screening lasts only for the current session.</div>
+          <button onClick="{{ goScreening }}" style="margin-top: 6px; border: 0; background: #0f7c83; color: #ffffff; font-size: 14px; font-weight: 600; padding: 11px 18px; min-height: 44px; border-radius: 9px; cursor: pointer;" style-hover="background: #0d6d73;">Start a new screening</button>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{ isHow }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; gap: 6px; max-width: 760px;">
+        <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.015em;">How it works</h1>
+        <div style="font-size: 15px; line-height: 1.55; color: #4c565d; text-wrap: pretty;">PneumoScan runs a pneumonia screening model on one chest X-ray at a time, explains which areas influenced the result, and flags when it is unsure. The model was trained across three hospitals without their images ever being shared.</div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px;">
+        <sc-for list="{{ howSteps }}" as="s" hint-placeholder-count="5">
+          <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px;">
+            <span style="font: 500 12px 'IBM Plex Mono', monospace; color: #0f7c83;">{{ s.n }}</span>
+            <span style="font-size: 15px; font-weight: 600;">{{ s.title }}</span>
+            <span style="font-size: 13.5px; line-height: 1.55; color: #4c565d; text-wrap: pretty;">{{ s.text }}</span>
+          </section>
+        </sc-for>
+      </div>
+      <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <h2 style="margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em;">Privacy-preserving federated AI</h2>
+          <div style="font-size: 13.5px; line-height: 1.5; color: #5b656d; text-wrap: pretty;">{{ flSub }}</div>
+        </div>
+        <div style="display: grid; grid-template-columns: minmax(0, 1.25fr) 90px minmax(0, 1fr) 40px minmax(0, 1fr); align-items: center; padding: 16px 12px; background: #f6f8f8; border-radius: 10px;">
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <sc-for list="{{ flNodes }}" as="h" hint-placeholder-count="3">
+              <div style="height: 60px; padding: 6px 10px; background: #ffffff; border: 1px solid #e0e6e9; border-radius: 8px; display: flex; flex-direction: column; justify-content: center; gap: 1px; min-width: 0;">
+                <span style="font-size: 13px; font-weight: 600; line-height: 1.25; flex-shrink: 0;">{{ h.name }}</span>
+                <span style="font-size: 11.5px; line-height: 1.25; flex-shrink: 0; color: #5b656d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ h.data }}</span>
+                <span style="font-size: 11px; line-height: 1.25; flex-shrink: 0; font-weight: 500; color: {{ flNodeColor }};">{{ flNodeNote }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="height: 204px;">{{ flowLeft }}</div>
+          <div style="padding: 12px 10px; background: {{ aggBg }}; border: 1px solid {{ aggBorder }}; border-radius: 10px; display: flex; flex-direction: column; gap: 3px; text-align: center; min-width: 0;">
+            <span style="font-size: 13px; font-weight: 600; color: {{ aggFg }};">{{ aggName }}</span>
+            <span style="font-size: 11px; line-height: 1.35; color: #4c565d;">{{ aggNote }}</span>
+          </div>
+          <div style="height: 204px;">{{ flowRight }}</div>
+          <div style="padding: 12px 10px; background: #14191d; border-radius: 10px; display: flex; flex-direction: column; gap: 3px; text-align: center; min-width: 0;">
+            <span style="font-size: 13px; font-weight: 600; color: #ffffff;">Global model</span>
+            <span style="font-size: 11px; line-height: 1.35; color: #aeb9be;">Used for this screening</span>
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px;">
+          <sc-for list="{{ flFacts }}" as="f" hint-placeholder-count="2">
+            <div style="display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid #e3e7ea; border-radius: 8px;">
+              <span style="flex: none; width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; background: {{ f.dot }};"></span>
+              <span style="font-size: 13px; line-height: 1.45; text-wrap: pretty;">{{ f.text }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+      <section style="background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 18px 20px; display: flex; flex-direction: column; gap: 4px;">
+        <button onClick="{{ toggleTech }}" style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 0; background: transparent; padding: 2px 0; cursor: pointer; text-align: left;">
+          <span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 18px; font-weight: 600; color: #14191d;">Technical details</span><span style="font-size: 13px; color: #5b656d;">For researchers and developers</span></span>
+          <span style="font-size: 13px; font-weight: 600; color: #0f7c83;">{{ techLabel2 }}</span>
+        </button>
+        <sc-if value="{{ techOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; margin-top: 12px;">
+            <sc-for list="{{ techSpecs }}" as="t" hint-placeholder-count="9">
+              <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.4fr); gap: 16px; padding: 9px 0; border-top: 1px solid #f0f2f3; font-size: 13.5px; line-height: 1.45;">
+                <span style="color: #5b656d;">{{ t.k }}</span>
+                <span>{{ t.v }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: #5b656d; margin-top: 16px; padding-bottom: 4px;">Privacy protections</div>
+        <sc-for list="{{ howLayers }}" as="l" hint-placeholder-count="4">
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr); gap: 16px; padding: 10px 0; border-top: 1px solid #f0f2f3; font-size: 13.5px; line-height: 1.45;">
+            <span style="font-weight: 600;">{{ l.name }}</span>
+            <span style="color: #4c565d;">{{ l.protects }}</span>
+            <span style="color: #4c565d;">{{ l.how }}</span>
+          </div>
+        </sc-for>
+        </sc-if>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{ isAbout }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;">
+        <section style="flex: 2 1 460px; min-width: 0; background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px;">
+          <h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.015em;">About PneumoScan</h1>
+          <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #3f484e; text-wrap: pretty;">PneumoScan is the demo interface for a research project on privacy-preserving medical diagnosis. It detects pneumonia patterns in chest X-rays using a DenseNet121 model trained with federated learning across three simulated hospitals, with differential privacy, secure aggregation, and encrypted, authenticated connections.</p>
+          <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #3f484e; text-wrap: pretty;">Training data: Kermany chest X-ray dataset (Hospital A) and RSNA Pneumonia Detection Challenge (Hospitals B and C). No patient data is stored in the project repository.</p>
+          <div style="display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid #f0f2f3;">
+            <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: #5b656d;">Known limitations</span>
+            <sc-for list="{{ limitations }}" as="t" hint-placeholder-count="4">
+              <div style="display: flex; gap: 10px; font-size: 14px; line-height: 1.5; color: #3f484e;"><span style="flex: none; width: 5px; height: 5px; margin-top: 9px; border-radius: 50%; background: #9aa7ad;"></span><span>{{ t }}</span></div>
+            </sc-for>
+          </div>
+        </section>
+        <section style="flex: 1 1 300px; min-width: 0; background: #ffffff; border: 1px solid #e3e7ea; border-radius: 12px; padding: 22px 24px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; line-height: 1.55;">
+          <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: #5b656d;">Project</span>
+          <span>B.Tech BCSE497J — Project I, SCOPE</span>
+          <span>Uddhav Sethi · Chirag Gadhyan · Ishaan S Shrivastav</span>
+          <span style="color: #5b656d;">Faculty guide: Dr. Adaline Suji</span>
+          <span style="color: #5b656d;">Aligned to UN SDG 3 — Good Health &amp; Well-Being</span>
+        </section>
+      </div>
+    </sc-if>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;scenario&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;pneumonia&quot;,&quot;normal&quot;,&quot;uncertain&quot;,&quot;lowconf&quot;,&quot;ood&quot;],&quot;default&quot;:&quot;pneumonia&quot;,&quot;tsType&quot;:&quot;'pneumonia'|'normal'|'uncertain'|'lowconf'|'ood'&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;startAt&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;upload&quot;,&quot;review&quot;],&quot;default&quot;:&quot;upload&quot;,&quot;tsType&quot;:&quot;'upload'|'review'&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;defaultMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;clinician&quot;,&quot;patient&quot;],&quot;default&quot;:&quot;clinician&quot;,&quot;tsType&quot;:&quot;'clinician'|'patient'&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;showSampleTags&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Demo&quot;},&quot;overlayPalette&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;jet&quot;,&quot;amber&quot;],&quot;default&quot;:&quot;jet&quot;,&quot;tsType&quot;:&quot;'jet'|'amber'&quot;,&quot;section&quot;:&quot;Viewer&quot;}}">
+const h = React.createElement;
+const TEAL = '#0f7c83';
+const SAMPLE_URL = 'https://commons.wikimedia.org/wiki/Special:FilePath/Normal_posteroanterior_(PA)_chest_radiograph_(X-ray).jpg?width=1400';
+const TOTAL = 4200;
+const RM0 = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Mirrors conf/app.yaml `configurations` (keys + labels). thr/hw = decision_threshold / abstention_half_width where the config sets them.
+const MODELS = [
+  { id: 'fedavg_no_dp', label: 'FedAvg (no privacy protection)', d: 0, thr: 0.45, hw: 0.05 },
+  { id: 'fedavg_dp_eps1', label: 'FedAvg + DP (ε = 1, strongest privacy)', dp: 1, d: -0.2 },
+  { id: 'fedavg_dp_eps2', label: 'FedAvg + DP (ε = 2)', dp: 2, d: -0.15 },
+  { id: 'fedavg_dp_eps4', label: 'FedAvg + DP (ε = 4)', dp: 4, d: -0.12 },
+  { id: 'fedavg_dp_eps8', label: 'FedAvg + DP (ε = 8, weakest privacy)', dp: 8, d: -0.08 },
+  { id: 'fedavg_secagg', label: 'FedAvg + Secure Aggregation', sec: true, d: 0 },
+  { id: 'centralized', label: 'Centralized (comparison only)', central: true, d: 0.03 },
+  { id: 'fedavg_finetune_pilot', label: 'FedAvg + fine-tuned last block', ft: true, d: 0.02, thr: 0.45, hw: 0.05 }
+];
+// Sample outputs shaped like app/inference.py InferenceResult. p = P(pneumonia), r = entropy / deferral threshold, flag = per-hospital OOD flag.
+const SCEN = {
+  pneumonia: { p: 0.91, r: 0.3, flag: [0, 1, 0], blobs: [[0.30, 0.64, 0.10, 1], [0.37, 0.50, 0.08, 0.55], [0.70, 0.42, 0.09, 0.22], [0.52, 0.16, 0.08, 0.15]] },
+  normal: { p: 0.08, r: 0.25, flag: [1, 0, 0], blobs: [[0.5, 0.46, 0.2, 0.45], [0.32, 0.40, 0.1, 0.25], [0.68, 0.45, 0.1, 0.25]] },
+  uncertain: { p: 0.47, r: 0.9, flag: [0, 0, 1], blobs: [[0.30, 0.60, 0.09, 0.8], [0.70, 0.62, 0.09, 0.74], [0.5, 0.3, 0.1, 0.3]] },
+  lowconf: { p: 0.68, r: 1.2, flag: [0, 1, 1], blobs: [[0.32, 0.58, 0.1, 0.8], [0.66, 0.5, 0.1, 0.6], [0.5, 0.25, 0.1, 0.35]] },
+  ood: { p: 0.3, r: 0.7, flag: [1, 1, 1], blobs: [[0.52, 0.07, 0.1, 0.8], [0.15, 0.88, 0.1, 0.5], [0.86, 0.82, 0.08, 0.4]] }
+};
+const ZNAME = { upper: 'upper zone', middle: 'middle zone', lower: 'lower zone' };
+const EDU = {
+  upper: ['Upper lung region', 'The upper zones reach from the top of each lung (the apex) down to around the level of the collarbones and front ribs. On a chest X-ray they appear at the top of each lung field.'],
+  middle: ['Middle lung region', 'The middle zones sit around the level where the main airways and blood vessels enter each lung. Because these structures fan out here, this area naturally looks busier on an X-ray.'],
+  lower: ['Lower lung region', 'The lower zones sit just above the diaphragm, the dome-shaped muscle that helps you breathe. This is one of the regions visible on a chest X-ray.']
+};
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+
+function makeGrid(blobs) {
+  const g = [];
+  let max = 0;
+  for (let j = 0; j < 7; j++) for (let i = 0; i < 7; i++) {
+    const u = (i + 0.5) / 7, v = (j + 0.5) / 7;
+    let s = (((Math.sin(i * 12.9898 + j * 78.233) * 43758.5453) % 1) + 1) % 1 * 0.07;
+    for (const [x, y, sg, a] of blobs) s += a * Math.exp(-((u - x) ** 2 + (v - y) ** 2) / (2 * sg * sg));
+    g.push(s); max = Math.max(max, s);
+  }
+  return g.map(v => v / max);
+}
+function sampleGrid(g, u, v) {
+  const x = clamp(u * 7 - 0.5, 0, 6), y = clamp(v * 7 - 0.5, 0, 6);
+  const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(6, x0 + 1), y1 = Math.min(6, y0 + 1), fx = x - x0, fy = y - y0;
+  const a = g[y0 * 7 + x0] * (1 - fx) + g[y0 * 7 + x1] * fx, b = g[y1 * 7 + x0] * (1 - fx) + g[y1 * 7 + x1] * fx;
+  return a * (1 - fy) + b * fy;
+}
+function paintHeat(grid, intensity, amber) {
+  const c7 = document.createElement('canvas'); c7.width = c7.height = 7;
+  const x7 = c7.getContext('2d'), id = x7.createImageData(7, 7);
+  grid.forEach((v, k) => { const g = Math.round(v * 255); id.data.set([g, g, g, 255], k * 4); });
+  x7.putImageData(id, 0, 0);
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const x = c.getContext('2d'); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+  x.drawImage(c7, 0, 0, 256, 256);
+  const d = x.getImageData(0, 0, 256, 256), p = d.data;
+  const thr = 0.7 * (1 - intensity / 100);
+  for (let i = 0; i < p.length; i += 4) {
+    const t = clamp((p[i] / 255 - thr) / (1 - thr), 0, 1);
+    let r, g, b;
+    if (amber) { r = 1; g = 0.3 + 0.6 * t; b = 0.08 + 0.35 * t * t; }
+    else { r = clamp(1.5 - Math.abs(4 * t - 3), 0, 1); g = clamp(1.5 - Math.abs(4 * t - 2), 0, 1); b = clamp(1.5 - Math.abs(4 * t - 1), 0, 1); }
+    p[i] = r * 255; p[i + 1] = g * 255; p[i + 2] = b * 255; p[i + 3] = t <= 0 ? 0 : 255 * Math.pow(t, 0.55) * 0.92;
+  }
+  x.putImageData(d, 0, 0);
+  const b64 = atob(c.toDataURL().split(',')[1]), u8 = new Uint8Array(b64.length);
+  for (let i = 0; i < b64.length; i++) u8[i] = b64.charCodeAt(i);
+  return URL.createObjectURL(new Blob([u8], { type: 'image/png' }));
+}
+
+function FlowLeft({ central }) {
+  const kids = [];
+  [30, 102, 174].forEach((y, i) => {
+    const d = `M0 ${y} C45 ${y} 45 102 90 102`;
+    kids.push(h('path', { key: 'p' + i, d, fill: 'none', stroke: '#cfd8dc', strokeWidth: 1.5 }));
+    kids.push(central
+      ? h('rect', { key: 'u' + i, x: -3.5, y: -3.5, width: 7, height: 7, rx: 1.5, fill: '#b36d12' }, h('animateMotion', { dur: '2.6s', repeatCount: 'indefinite', begin: `-${i * 0.8}s`, path: d }))
+      : h('circle', { key: 'u' + i, r: 3.5, fill: TEAL }, h('animateMotion', { dur: '2.6s', repeatCount: 'indefinite', begin: `-${i * 0.8}s`, path: d })));
+    if (!central) kids.push(h('circle', { key: 'd' + i, r: 3, fill: '#d49a3f' }, h('animateMotion', { dur: '2.6s', repeatCount: 'indefinite', begin: `-${1.3 + i * 0.8}s`, path: d, keyPoints: '1;0', keyTimes: '0;1', calcMode: 'linear' })));
+  });
+  return h('svg', { width: 90, height: 204, viewBox: '0 0 90 204', style: { display: 'block', overflow: 'visible' } }, kids);
+}
+function FlowRight() {
+  const d = 'M0 102 L40 102';
+  return h('svg', { width: 40, height: 204, viewBox: '0 0 40 204', style: { display: 'block', overflow: 'visible' } },
+    h('path', { d, stroke: '#cfd8dc', strokeWidth: 1.5, fill: 'none' }),
+    h('circle', { r: 3.5, fill: TEAL }, h('animateMotion', { dur: '1.3s', repeatCount: 'indefinite', path: d })));
+}
+
+class Component extends DCLogic {
+  state = {
+    screen: 'screening', mode: this.props.defaultMode === 'patient' ? 'patient' : 'clinician', model: 'fedavg_secagg', techOpen: false,
+    sel: null, lastSel: null, breathing: !RM0, autoRotate: !RM0, explorerView: '3d', lungViewName: 'front',
+    layers: { lungs: true, lobes: true, bronchi: true, trachea: true, heart: true, ribs: false, spine: false },
+    phase: 'upload', img: null, err: null, qStep: 0, elapsed: 0, view: 'overlay', zoom: 1, panX: 0, panY: 0,
+    invert: false, max: false, opacity: 72, intensity: 60, showCam: true, compare: 50, hover: null, dragging: false,
+    dragOver: false, vp: { w: 800, h: 600 }, revealed: true
+  };
+
+  componentDidMount() {
+    this.onMsg = (e) => {
+      const d = e.data || {};
+      if (d.type === 'pneumoscan-lung-ready') { this.lastLung = null; this.sendLung(); }
+      if (d.type === 'pneumoscan-lung-select') this.setState(st => ({ sel: d.sel, lastSel: d.sel || st.lastSel }));
+      if (d.type === 'pneumoscan-lung-view') this.setState({ lungViewName: d.name });
+    };
+    this.onKey = (e) => { if (e.key === 'Escape' && this.state.max) this.setState({ max: false }); };
+    window.addEventListener('message', this.onMsg);
+    window.addEventListener('keydown', this.onKey);
+    if (this.props.startAt === 'review') this.loadImage(SAMPLE_URL, { name: 'Sample PA radiograph', format: 'JPEG', size: null }, true);
+  }
+  componentDidUpdate() { this.sendLung(); }
+  componentWillUnmount() {
+    window.removeEventListener('message', this.onMsg); window.removeEventListener('keydown', this.onKey);
+    clearInterval(this.qTimer); clearInterval(this.aTimer); this.ro && this.ro.disconnect();
+  }
+
+  vpRef = (el) => {
+    if (this.vpEl === el) return;
+    if (this.vpEl) { this.ro && this.ro.disconnect(); this.vpEl.removeEventListener('wheel', this.onWheel); }
+    this.vpEl = el;
+    if (!el) return;
+    this.ro = new ResizeObserver(([en]) => {
+      const r = en.contentRect;
+      if (Math.abs(r.width - this.state.vp.w) > 1 || Math.abs(r.height - this.state.vp.h) > 1) this.setState({ vp: { w: r.width, h: r.height } });
+    });
+    this.ro.observe(el);
+    el.addEventListener('wheel', this.onWheel, { passive: false });
+  };
+  stageRef = (el) => { this.stageEl = el; };
+  fileRef = (el) => { this.fileEl = el; };
+  lungRef = (el) => { this.lungEl = el; this.lastLung = null; };
+  exploreRef = (el) => { this.exploreEl = el; };
+
+  derive() {
+    const s = this.state;
+    const sc = SCEN[this.props.scenario] || SCEN.pneumonia;
+    const m = MODELS.find(x => x.id === s.model) || MODELS[5];
+    const amber = this.props.overlayPalette === 'amber';
+    const key = (this.props.scenario || 'pneumonia') + s.intensity + amber;
+    if (!this._heat || this._heat.key !== key) {
+      const grid = this._heat && this._heat.scen === sc ? this._heat.grid : makeGrid(sc.blobs);
+      if (this._heat) URL.revokeObjectURL(this._heat.url);
+      this._heat = { key, scen: sc, grid, url: paintHeat(grid, s.intensity, amber) };
+    }
+    const grid = this._heat.grid;
+    let best = 0; grid.forEach((v, k) => { if (v > grid[best]) best = k; });
+    const pu = (best % 7 + 0.5) / 7, pv = (Math.floor(best / 7) + 0.5) / 7;
+    // Same decision logic as run_full_inference(): threshold + abstention band, then MC-dropout entropy vs deferral threshold.
+    const p = clamp(sc.p + m.d * (sc.p > 0.5 ? 1 : 0.3), 0.01, 0.99);
+    const thr = m.thr ?? 0.5, hw = m.hw ?? 0;
+    const abstained = p >= thr - hw && p <= thr + hw;
+    const label = abstained ? 'Uncertain' : p >= thr ? 'Pneumonia' : 'Normal';
+    const conf = label === 'Pneumonia' ? p : label === 'Normal' ? 1 - p : Math.max(p, 1 - p);
+    const avail = !m.ft; // deferral + OOD calibration caches are frozen-backbone only
+    const band = !avail ? 'Unavailable' : sc.r < 0.5 ? 'Low' : sc.r < 1 ? 'Medium' : 'High';
+    const deferred = avail && sc.r >= 1;
+    const flags = avail ? sc.flag.map(Boolean) : [false, false, false];
+    let focus = null;
+    if (label === 'Pneumonia' && pu > 0.1 && pu < 0.9 && pv > 0.12 && pv < 0.85) {
+      const t = (pv - 0.12) / 0.68;
+      focus = { side: pu < 0.5 ? 'right' : 'left', zone: t < 0.34 ? 'upper' : t < 0.67 ? 'middle' : 'lower' };
+    }
+    const camTarget = abstained ? (p >= 0.5 ? 'Pneumonia' : 'Normal') : label;
+    return { sc: { ...sc, label: camTarget }, pu, pv, m, p, thr, abstained, label, conf, band, deferred, avail, flags, focus, heatUrl: this._heat.url, grid, peakOutside: label === 'Pneumonia' && !focus, entropyRatio: sc.r };
+  }
+
+  sendLung() {
+    if (!this.lungEl || !this.lungEl.contentWindow) return;
+    const d = this.derive();
+    const s = this.state, an = s.phase === 'analyzing';
+    const st = { focus: (s.phase === 'review' || (an && s.elapsed >= 3200)) && d.focus ? { ...d.focus, u: d.pu, v: d.pv } : null, showFocus: s.showCam, select: s.sel, mode: s.mode, layers: s.layers, breathing: s.breathing, autoRotate: s.autoRotate, scan: an ? { active: true, progress: Math.round(s.elapsed / TOTAL * 100) / 100 } : { active: false } };
+    const k = JSON.stringify(st);
+    if (k === this.lastLung) return;
+    this.lastLung = k;
+    this.lungEl.contentWindow.postMessage({ type: 'pneumoscan-lung', state: st }, '*');
+  }
+  lungView(v) { this.lungEl && this.lungEl.contentWindow && this.lungEl.contentWindow.postMessage({ type: 'pneumoscan-view', view: v }, '*'); }
+
+  loadImage(src, meta, toReview) {
+    const attempt = (cors) => {
+      const img = new Image();
+      if (cors) img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        let gray = null;
+        try {
+          const c = document.createElement('canvas'); c.width = c.height = 48;
+          const x = c.getContext('2d'); x.drawImage(img, 0, 0, 48, 48);
+          const p = x.getImageData(0, 0, 48, 48).data; let sum = 0;
+          for (let i = 0; i < p.length; i += 4) sum += Math.abs(p[i] - p[i + 1]) + Math.abs(p[i + 1] - p[i + 2]);
+          gray = sum / 2304 < 12;
+        } catch (e) { gray = null; }
+        const study = { url: src, w: img.naturalWidth, h: img.naturalHeight, gray, ...meta, id: 'PS-' + Date.now().toString(36).slice(-6).toUpperCase(), time: new Date() };
+        clearInterval(this.qTimer); clearInterval(this.aTimer);
+        const base = { img: study, err: null, zoom: 1, panX: 0, panY: 0, hover: null, sel: null, view: 'overlay', elapsed: 0 };
+        if (toReview) { this.setState({ ...base, phase: 'review', qStep: 4, elapsed: TOTAL }); this.reveal(); return; }
+        this.setState({ ...base, phase: 'quality', qStep: 0 });
+        this.qTimer = setInterval(() => this.setState(s => {
+          if (s.qStep >= 3) clearInterval(this.qTimer);
+          return { qStep: Math.min(4, s.qStep + 1) };
+        }), 260);
+      };
+      img.onerror = () => { if (cors) attempt(false); else this.setState({ err: 'This image could not be opened. Try a JPEG or PNG file.' }); };
+      img.src = src;
+    };
+    attempt(!src.startsWith('blob:'));
+  }
+  handleFile(f) {
+    const lower = f.name.toLowerCase();
+    if (lower.endsWith('.dcm') || f.type === 'application/dicom') return this.setState({ err: 'DICOM files are decoded by the backend service (app/inference.py). This preview can open JPEG or PNG.' });
+    if (!/image\/(png|jpeg)/.test(f.type)) return this.setState({ err: 'Unsupported file. Use a JPEG or PNG chest X-ray.' });
+    const kb = f.size / 1024;
+    this.loadImage(URL.createObjectURL(f), { name: f.name, format: f.type === 'image/png' ? 'PNG' : 'JPEG', size: kb > 1024 ? (kb / 1024).toFixed(1) + ' MB' : Math.round(kb) + ' KB' });
+  }
+  reveal() { this.setState({ revealed: false }); setTimeout(() => this.setState({ revealed: true }), 60); }
+  run = () => {
+    clearInterval(this.aTimer);
+    const t0 = Date.now();
+    this.setState({ phase: 'analyzing', elapsed: 0, view: 'overlay', zoom: 1, panX: 0, panY: 0 });
+    this.aTimer = setInterval(() => {
+      const e = Date.now() - t0;
+      if (e >= TOTAL) { clearInterval(this.aTimer); this.setState({ phase: 'review', elapsed: TOTAL }); this.reveal(); }
+      else this.setState({ elapsed: e });
+    }, 50);
+  };
+  startOver = () => {
+    clearInterval(this.qTimer); clearInterval(this.aTimer);
+    if (this.state.img && this.state.img.url.startsWith('blob:')) URL.revokeObjectURL(this.state.img.url);
+    this.setState({ phase: 'upload', img: null, err: null, qStep: 0, elapsed: 0, zoom: 1, panX: 0, panY: 0, hover: null, sel: null, max: false, screen: 'screening', explorerView: '3d' });
+  };
+
+  onWheel = (e) => {
+    if (!this.state.img) return;
+    e.preventDefault();
+    const r = this.vpEl.getBoundingClientRect();
+    const px = e.clientX - r.left - r.width / 2, py = e.clientY - r.top - r.height / 2, dy = e.deltaY;
+    this.setState(s => {
+      const z2 = clamp(s.zoom * Math.exp(-dy * 0.0015), 1, 8);
+      if (z2 === 1) return { zoom: 1, panX: 0, panY: 0 };
+      const qx = (px - s.panX) / s.zoom, qy = (py - s.panY) / s.zoom;
+      return { zoom: z2, panX: px - qx * z2, panY: py - qy * z2 };
+    });
+  };
+  zoomBy(f) { this.setState(s => { const z = clamp(s.zoom * f, 1, 8); return z === 1 ? { zoom: 1, panX: 0, panY: 0 } : { zoom: z, panX: s.panX * z / s.zoom, panY: s.panY * z / s.zoom }; }); }
+  onPointerDown = (e) => {
+    if (!this.state.img || e.button !== 0) return;
+    this.drag = { x: e.clientX, y: e.clientY, px: this.state.panX, py: this.state.panY };
+    e.currentTarget.setPointerCapture && e.currentTarget.setPointerCapture(e.pointerId);
+    this.setState({ dragging: true });
+  };
+  onHandleDown = (e) => {
+    e.stopPropagation();
+    this.drag = { compare: true };
+    e.currentTarget.setPointerCapture && e.currentTarget.setPointerCapture(e.pointerId);
+    this.setState({ dragging: true });
+  };
+  onPointerMove = (e) => {
+    const s = this.state;
+    if (!s.img) return;
+    const patch = {};
+    if (this.drag && this.drag.compare && this.stageEl) {
+      const r = this.stageEl.getBoundingClientRect();
+      patch.compare = clamp((e.clientX - r.left) / r.width * 100, 2, 98);
+    } else if (this.drag && s.zoom > 1) {
+      patch.panX = this.drag.px + e.clientX - this.drag.x; patch.panY = this.drag.py + e.clientY - this.drag.y;
+    }
+    if (this.stageEl) {
+      const r = this.stageEl.getBoundingClientRect();
+      const u = (e.clientX - r.left) / r.width, v = (e.clientY - r.top) / r.height;
+      patch.hover = u >= 0 && u <= 1 && v >= 0 && v <= 1 ? { x: Math.round(u * s.img.w), y: Math.round(v * s.img.h), u, v } : null;
+    }
+    this.setState(patch);
+  };
+  onPointerUp = () => { this.drag = null; if (this.state.dragging) this.setState({ dragging: false }); };
+  onPointerLeave = () => { if (!this.drag) this.setState({ hover: null }); };
+  onDragOver = (e) => { e.preventDefault(); if (!this.state.img && !this.state.dragOver) this.setState({ dragOver: true }); };
+  onDragLeave = () => this.setState({ dragOver: false });
+  onDrop = (e) => { e.preventDefault(); this.setState({ dragOver: false }); const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) this.handleFile(f); };
+  scrollToExplore = () => { const fc = this.state.phase === 'review' ? this.derive().focus : null; this.setState(st => { const ns = fc ? { kind: 'zone', side: fc.side, zone: fc.zone } : st.sel; return { explorerView: '3d', sel: ns, lastSel: ns || st.lastSel }; }); if (this.exploreEl) window.scrollTo({ top: this.exploreEl.getBoundingClientRect().top + window.scrollY - 110, behavior: 'smooth' }); };
+
+  renderVals() {
+    const s = this.state;
+    const D = this.derive();
+    const { sc, m, conf, band, focus } = D;
+    const clin = s.mode === 'clinician';
+    const img = s.img;
+    const review = s.phase === 'review';
+    const analyzing = s.phase === 'analyzing';
+    const heatOn = s.showCam && (review || (analyzing && s.elapsed >= 3300));
+    const deferred = D.deferred;
+    const flags = D.flags.filter(Boolean).length;
+    const allFlagged = D.avail && flags === 3;
+    const label = D.label;
+    const fed = !m.central;
+    const pct = v => Math.round(v * 100) + '%';
+    const sideName = f => (f.side === 'right' ? 'Right' : 'Left') + ' lung · ' + ZNAME[f.zone];
+
+    const stepIdx = s.phase === 'upload' ? 0 : s.phase === 'quality' ? 1 : analyzing ? (s.elapsed < 3200 ? 2 : 3) : 4;
+    const stepDefs = clin
+      ? [['Upload X-ray', 'Drop or choose a file'], ['Image check', 'Is the file usable?'], ['AI analysis', 'A few seconds'], ['AI highlight', 'Where it looked'], ['Your review', 'You make the call']]
+      : [['Upload X-ray', 'Add your image'], ['Image check', 'Is it readable?'], ['AI screening', 'The AI looks'], ['Explanation', 'Where it looked'], ['Your results', 'In plain language']];
+    const steps = stepDefs.map(([label, sub], i) => {
+      const done = i < stepIdx || (i === 1 && s.phase === 'quality' && s.qStep >= 4);
+      const cur = i === stepIdx && !done;
+      return {
+        n: 'Step ' + (i + 1), label, sub: done ? (i === 1 ? 'Passed' : 'Done') : cur ? (review ? 'Ready' : 'In progress') : sub,
+        mark: done ? '✓' : String(i + 1), bg: done ? TEAL : '#ffffff', fg: done ? '#ffffff' : cur ? TEAL : '#8a959b',
+        border: done ? '1.5px solid ' + TEAL : cur ? '1.5px solid ' + TEAL : '1.5px solid #d3dadd',
+        line: i === 4 ? 'transparent' : i < stepIdx ? TEAL : '#e3e7ea',
+        labelColor: done || cur ? '#14191d' : '#6b767d', subColor: cur ? TEAL : '#7a848b'
+      };
+    });
+
+    const vw = s.vp.w, vh = s.vp.h;
+    const fitS = img ? Math.min(vw / img.w, vh / img.h) * 0.96 : 1;
+    const stageW = img ? img.w * fitS : 0, stageH = img ? img.h * fitS : 0;
+
+    const qDefs = img ? [
+      ['Image decoded', 'OK', 'ok'],
+      ['Format supported', img.format, 'ok'],
+      ['Resolution', `${img.w} × ${img.h}`, Math.min(img.w, img.h) >= 256 ? 'ok' : 'warn'],
+      ['Grayscale radiograph', img.gray === null ? 'Not checked' : img.gray ? 'Yes' : 'Colour', img.gray === null ? 'na' : img.gray ? 'ok' : 'warn']
+    ] : [['Image decoded', '—'], ['Format supported', '—'], ['Resolution', '—'], ['Grayscale radiograph', '—']];
+    const qualityRows = qDefs.map(([label, value, st], i) => {
+      const shown = img && i < s.qStep;
+      const k = shown ? st : 'pending';
+      return {
+        label, value: shown ? value : img ? '…' : '—',
+        icon: k === 'ok' ? '✓' : k === 'warn' ? '!' : '–',
+        bg: k === 'ok' ? '#e4f1f1' : k === 'warn' ? '#fbf0dc' : '#f0f2f3',
+        fg: k === 'ok' ? TEAL : k === 'warn' ? '#8a520a' : '#8a959b'
+      };
+    });
+    const warnings = img ? qDefs.filter(q => q[2] === 'warn').length : 0;
+    const gatePassed = review || (analyzing && s.elapsed >= 450);
+    qualityRows.push({
+      label: 'Chest X-ray detected', value: gatePassed ? 'Passed' : img ? 'At screening' : '—',
+      icon: gatePassed ? '✓' : '–', bg: gatePassed ? '#e4f1f1' : '#f0f2f3', fg: gatePassed ? TEAL : '#8a959b'
+    });
+
+    const statusLabel = !img ? 'Waiting for image' : s.phase === 'quality' ? (s.qStep >= 4 ? 'Ready to screen' : 'Checking image') : analyzing ? 'Analyzing' : 'Awaiting review';
+    const subDefs = clin
+      ? [['Confirming it is a chest X-ray', 'Before anything else', 0, 450], ['Preparing the image', 'Contrast and size', 450, 900], ['Analyzing', 'Looking for pneumonia patterns', 900, 2600], ['Comparing with training X-rays', 'Is this a typical image?', 2600, 3200], ['Building the AI highlight', 'Where the AI looked', 3200, TOTAL]]
+      : [['Is this a chest X-ray?', 'A quick check before anything else', 0, 450], ['Preparing the image', 'Adjusting contrast and size', 450, 900], ['AI screening', 'The AI looks at the image several times', 900, 2600], ['Checking the image is typical', 'Compared with the images the AI learned from', 2600, 3200], ['Finding where the AI looked', 'Building the highlight map', 3200, TOTAL]];
+    const subSteps = subDefs.map(([label, detail, a, b], i) => {
+      const done = s.elapsed >= b, run = s.elapsed >= a && s.elapsed < b;
+      let det = detail;
+      return { label, detail: det, mark: done ? '✓' : '', bg: done ? TEAL : '#ffffff', border: done ? '0' : run ? '2px solid ' + TEAL : '1.5px solid #d3dadd', color: done || run ? '#14191d' : '#7a848b' };
+    });
+
+    const fmtTime = d => d ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+    const studyRows = [
+      { k: 'Study ID', v: img ? img.id : '—', font: "'IBM Plex Mono', monospace" },
+      { k: 'Image', v: img ? img.name : '—', font: 'inherit' },
+      { k: 'Projection', v: img ? 'PA (expected)' : '—', font: 'inherit' },
+      { k: 'Dimensions', v: img ? `${img.w} × ${img.h} px` : '—', font: "'IBM Plex Mono', monospace" },
+      { k: 'File size', v: img && img.size ? img.size : '—', font: "'IBM Plex Mono', monospace" },
+      { k: 'Loaded', v: img ? fmtTime(img.time) : '—', font: "'IBM Plex Mono', monospace" },
+      { k: 'Patient', v: 'Not recorded', font: 'inherit' }
+    ];
+
+    const view = review ? s.view : 'original';
+    const viewModes = [['original', 'Original'], ['overlay', 'AI overlay'], ['compare', 'Compare']].map(([id, label]) => ({
+      label, onClick: () => review && this.setState({ view: id, showCam: true }),
+      bg: view === id && (review || id === 'original') ? '#33414a' : 'transparent', fg: view === id ? '#ffffff' : '#9aa7ad', op: review || id === 'original' ? 1 : 0.4
+    }));
+    const layers = [
+      { label: 'Grad-CAM', ok: true, on: s.showCam, title: 'Class activation map from the model' },
+      { label: 'Lung segmentation', title: 'Not produced by this model' },
+      { label: 'Pneumonia region', title: 'Not produced by this model — Grad-CAM is not a region detector' },
+      { label: 'Confidence map', title: 'Not produced by this model' }
+    ].map(l => ({
+      ...l, onClick: () => l.ok && review && this.setState(st => ({ showCam: !st.showCam, view: st.view === 'original' ? 'overlay' : st.view })),
+      mark: l.on ? '✓' : '', fill: l.on ? '#56c7cd' : 'transparent', box: l.on ? '#56c7cd' : '#4a5860', op: l.ok ? 1 : 0.42, cursor: l.ok ? 'pointer' : 'not-allowed'
+    }));
+
+    const hov = s.hover;
+    const camVal = hov && heatOn && view !== 'original' ? sampleGrid(D.grid, hov.u, hov.v) : null;
+    const zones = ['upper', 'middle', 'lower'];
+
+    const oodRows = [['Hospital A', 'Kermany dataset'], ['Hospital B', 'RSNA dataset'], ['Hospital C', 'RSNA dataset']].map(([name, source], i) => ({
+      name, source,
+      status: !D.avail ? 'Unavailable' : D.flags[i] ? 'Unusual' : 'Typical',
+      bg: !D.avail ? '#f0f2f3' : D.flags[i] ? '#fbf0dc' : '#e4f1f1', fg: !D.avail ? '#5b656d' : D.flags[i] ? '#8a520a' : TEAL
+    }));
+    const isPn = label === 'Pneumonia';
+    const isUnc = label === 'Uncertain';
+
+    const nextSteps = [
+      { text: 'Compare the highlight with the original image', action: 'Compare', onClick: () => this.setState({ view: 'compare', showCam: true }) },
+      { text: 'See the approximate lung zone in 3D', action: 'Open 3D', onClick: this.scrollToExplore },
+      { text: 'Make your own read of the X-ray', action: null }
+    ].map((n, i) => ({ ...n, n: i + 1, hasAction: !!n.action }));
+
+    const EXV = s.explorerView;
+    const certWord = band === 'Unavailable' ? 'Not available' : band === 'Low' ? 'High' : band === 'Medium' ? 'Medium' : 'Low';
+    const ZT = { upper: 'Upper', middle: 'Middle', lower: 'Lower' };
+    const STRUCT = {
+      trachea: ['Trachea', 'Main airway', 'The windpipe. It carries air from the throat into the chest, where it divides into the two main bronchi.'],
+      main: ['Main bronchi', 'Airways', 'The two main airways branching from the trachea, one into each lung.'],
+      tree: ['Bronchial tree', 'Airways', 'Smaller airways that keep branching to carry air deep into every part of the lungs.'],
+      heart: ['Heart', 'Reference', 'Shown for orientation. It sits between the lungs, slightly to the left.'],
+      ribs: ['Rib cage', 'Reference', 'The ribs protect the lungs. On a chest X-ray they appear as curved bright bands.'],
+      spine: ['Spine', 'Reference', 'Runs down the back of the chest. Shown for orientation.']
+    };
+    const cur = s.sel || s.lastSel;
+    let infoTitle = '', infoSub = '', infoText = '', infoHasFocus = false, infoRows = [];
+    if (cur && cur.kind === 'zone') {
+      infoTitle = cur.side === 'right' ? 'Right lung' : cur.side === 'left' ? 'Left lung' : 'Both lungs';
+      infoSub = ZT[cur.zone] + ' region'; infoText = EDU[cur.zone][1];
+      infoHasFocus = review && !!focus && s.showCam && focus.zone === cur.zone && (cur.side === 'both' || cur.side === focus.side);
+      if (clin && review) infoRows = infoHasFocus ? [{ k: 'Model confidence', v: pct(conf) }, { k: 'Certainty', v: certWord }] : [{ k: 'AI focus', v: 'Not here' }];
+    } else if (cur && cur.kind === 'structure' && STRUCT[cur.id]) {
+      [infoTitle, infoSub, infoText] = STRUCT[cur.id];
+    }
+    let fz = { l: '0%', t: '0%', w: '0%', h: '0%' };
+    if (focus) {
+      const u0 = focus.side === 'right' ? 0.1 : 0.51, u1 = focus.side === 'right' ? 0.49 : 0.9, zi = { upper: 0, middle: 1, lower: 2 }[focus.zone], v0 = 0.12 + zi * 0.68 / 3;
+      fz = { l: u0 * 100 + '%', t: v0 * 100 + '%', w: (u1 - u0) * 100 + '%', h: (0.68 / 3) * 100 + '%' };
+    }
+    const pg = s.elapsed / TOTAL;
+    const LY = [['lungs', 'Lungs', '#9fd3d8', ''], ['lobes', 'Lobes', '#cfe7ea', ''], ['bronchi', 'Bronchi', '#e8f1f3', ''], ['trachea', 'Trachea', '#e8f1f3', ''], ['heart', 'Heart', '#c9918a', 'Reference'], ['ribs', 'Rib cage', '#e6dccb', ''], ['spine', 'Spine', '#e6dccb', '']];
+    const selZone = s.sel && s.sel.kind === 'zone' ? s.sel.zone : null;
+    const privacyText = m.central ? 'Images pooled centrally — comparison only' : m.dp ? `Images stayed local · differential privacy ε = ${m.dp}` : m.sec ? 'Images stayed local · secure aggregation' : 'Images stayed local during training';
+
+    return {
+      explorerEyebrow: clin ? '3D anatomical explorer' : '3D lung explanation',
+      explorerTitle: clin ? 'Lungs and AI focus region' : 'Explore the lungs',
+      explorerSub: clin ? 'Explore an illustrative representation of the lungs and the region highlighted by the AI.' : 'Turn the model and tap a region to learn about it. This is a general model of the lungs, not a scan of your body.',
+      exSeg: [['xray', 'X-ray'], ['3d', '3D anatomy']].map(([id, label]) => ({ label, onClick: () => this.setState({ explorerView: id }), bg: EXV === id ? 'rgba(255,255,255,0.14)' : 'transparent', fg: EXV === id ? '#ffffff' : '#9aa7ad' })),
+      threeOpacity: EXV === '3d' ? 1 : 0, threeTransform: EXV === '3d' ? 'scale(1)' : 'scale(1.04)', threePE: EXV === '3d' ? 'auto' : 'none',
+      xrayOpacity: EXV === 'xray' ? 1 : 0, xrayTransform: EXV === 'xray' ? 'scale(1)' : 'scale(0.97)', xrayPE: EXV === 'xray' ? 'auto' : 'none',
+      xrHeatOp: heatOn ? 0.72 : 0, xrFocus: review && !!focus && s.showCam,
+      fzLeft: fz.l, fzTop: fz.t, fzW: fz.w, fzH: fz.h,
+      openFocus3d: () => { if (!focus) return; const ns = { kind: 'zone', side: focus.side, zone: focus.zone }; this.setState({ explorerView: '3d', sel: ns, lastSel: ns }); },
+      showLayersPanel: clin && EXV === '3d', show3dPanels: EXV === '3d',
+      layerRows: [...LY.map(([k, label, sw, note]) => { const on = s.layers[k]; return { label, note, swatch: sw, mark: on ? '✓' : '', fill: on ? '#56c7cd' : 'transparent', box: on ? '#56c7cd' : '#4a5860', onClick: () => this.setState(st => ({ layers: { ...st.layers, [k]: !st.layers[k] } })) }; }),
+        { label: 'AI focus', note: review && focus ? 'Approx.' : 'After analysis', swatch: '#e0a040', mark: s.showCam ? '✓' : '', fill: s.showCam ? '#e0a040' : 'transparent', box: s.showCam ? '#e0a040' : '#4a5860', onClick: () => this.setState(st => ({ showCam: !st.showCam })) }],
+      viewOpts: [['front', 'Front'], ['left', 'Left'], ['right', 'Right'], ['top', 'Top']].map(([id, label]) => { const on = s.lungViewName === id; return { label, onClick: () => this.lungView(id), bg: on ? 'rgba(86,199,205,0.14)' : 'transparent', fg: on ? '#ffffff' : '#b9c3c8', ring: on ? '#56c7cd' : '#56656d', dot: on ? '#56c7cd' : 'transparent' }; }),
+      exZoomIn: () => this.lungView('zoomIn'), exZoomOut: () => this.lungView('zoomOut'), exReset: () => { this.lungView('reset'); this.setState({ sel: null }); },
+      toggleRot: () => this.setState(st => ({ autoRotate: !st.autoRotate })), rotTrack: s.autoRotate ? '#3cb1b8' : '#3a474f', rotKnob: s.autoRotate ? '17px' : '3px',
+      toggleBreath: () => this.setState(st => ({ breathing: !st.breathing })), brTrack: s.breathing ? '#3cb1b8' : '#3a474f', brKnob: s.breathing ? '17px' : '3px',
+      infoTitle, infoSub, infoText, infoHasFocus, infoRows,
+      infoOpacity: s.sel && EXV === '3d' ? 1 : 0, infoTransform: s.sel ? 'translateX(0)' : 'translateX(14px)', infoPE: s.sel ? 'auto' : 'none',
+      closeInfo: () => this.setState({ sel: null }),
+      showRing: clin && review, showPatientNote: !clin && review,
+      confDeg: (s.revealed ? Math.round(conf * 360) : 0) + 'deg',
+      ringFinding: isPn ? 'Pneumonia pattern' : isUnc ? 'Inconclusive' : 'No pneumonia pattern',
+      ringCertainty: 'Certainty: ' + certWord,
+      patientNote: focus && s.showCam ? 'The AI looked most closely at the ' + (focus.side === 'right' ? 'right' : 'left') + ' lung, ' + ZT[focus.zone].toLowerCase() + ' area. The glowing spot shows roughly where.' : isPn ? 'The AI\u2019s attention was spread out rather than in one area.' : 'The AI did not focus on one particular area.',
+      scanActive: analyzing,
+      scanStages: [['Analyzing chest X-ray', 0, 0.62], ['Mapping model attention', 0.62, 0.8], ['Generating visualization', 0.8, 1.01]].map(([label, a, b]) => { const done = pg >= b, run = pg >= a && pg < b; return { label, dot: done ? '#56c7cd' : run ? '#9fecef' : 'rgba(255,255,255,0.18)', glow: run ? '0 0 10px 2px rgba(86,199,205,0.6)' : 'none', fg: done ? '#9aa7ad' : run ? '#ffffff' : '#5f6d73' }; }),
+      showHints: !analyzing && !review,
+      exChips: zones.map(z => { const on = selZone === z, isF = review && !!focus && s.showCam && focus.zone === z, hi = on ? '#56c7cd' : '#0f7c83', lo = on ? '#3a474f' : '#d3dadd';
+        return { label: ZT[z] + ' lung', hasTag: isF, bg: on ? '#0e1215' : '#ffffff', fg: on ? '#ffffff' : '#14191d', border: on ? '#0e1215' : '#d8dee2',
+          s1: z === 'upper' ? hi : lo, s2: z === 'middle' ? hi : lo, s3: z === 'lower' ? hi : lo,
+          onClick: () => this.setState(st => { const same = st.sel && st.sel.kind === 'zone' && st.sel.zone === z; const ns = same ? null : { kind: 'zone', side: isF ? focus.side : 'both', zone: z }; return { sel: ns, lastSel: ns || st.lastSel, explorerView: '3d' }; }) }; }),
+      techLabel2: s.techOpen ? 'Hide' : 'Show',
+      techSpecs: [
+        ['Model', 'DenseNet121 with an ImageNet-pretrained backbone'],
+        ['Training', 'Federated averaging (FedAvg) across 3 participating sites'],
+        ['Aggregation', 'Secure aggregation — the server sees only the combined update'],
+        ['Transport', 'TLS with client authentication'],
+        ['Uncertainty', 'Monte Carlo dropout (20 passes); high-uncertainty cases are flagged for review'],
+        ['Decision threshold', 'Calibrated on the validation set, with an abstention band'],
+        ['Image checks', 'Chest X-ray gate and per-site out-of-distribution detectors'],
+        ['Explanation', 'Grad-CAM for the predicted class'],
+        ['Training data', 'Kermany (site A); RSNA Pneumonia Detection Challenge (sites B and C)']
+      ].map(([k, v]) => ({ k, v })),
+      navItems: [['screening', 'New Screening'], ['studies', 'Previous Studies'], ['how', 'How It Works'], ['about', 'About']].map(([id, label]) => ({
+        label, onClick: () => this.setState({ screen: id, max: false }), bg: s.screen === id ? '#e9f3f3' : 'transparent', fg: s.screen === id ? '#0a5c61' : '#4c565d'
+      })),
+      setClinician: () => this.setState({ mode: 'clinician' }),
+      setPatient: () => this.setState({ mode: 'patient' }),
+      clinBg: clin ? '#ffffff' : 'transparent', clinFg: clin ? '#14191d' : '#5b656d', clinShadow: clin ? '0 1px 2px rgba(20,25,29,0.12)' : 'none',
+      patBg: !clin ? '#ffffff' : 'transparent', patFg: !clin ? '#14191d' : '#5b656d', patShadow: !clin ? '0 1px 2px rgba(20,25,29,0.12)' : 'none',
+      modeInitial: clin ? 'C' : 'P', modeUser: clin ? 'Clinician' : 'Patient',
+      models: MODELS, model: s.model, onModel: (e) => this.setState({ model: e.target.value }), modelLabel: m.label,
+
+      isScreening: s.screen === 'screening', isStudies: s.screen === 'studies', isHow: s.screen === 'how', isAbout: s.screen === 'about',
+      goScreening: () => this.setState({ screen: 'screening' }),
+      pageTitle: clin ? 'New screening' : 'Check a chest X-ray',
+      pageSub: !img ? (clin ? 'Upload a chest X-ray to begin. The AI screens for pneumonia patterns and shows what influenced its result.' : 'Add a chest X-ray and the AI will explain what it sees, in plain language.') : review ? (clin ? 'Results are ready for your review.' : 'Your results are ready below.') : 'Your image is being prepared.',
+      hasImage: !!img, noImage: !img, startOver: this.startOver,
+      steps,
+      statusLabel, statusBg: review ? '#fbf0dc' : img ? '#e4f1f1' : '#f0f2f3', statusFg: review ? '#8a520a' : img ? TEAL : '#5b656d',
+      studyRows, qualityRows,
+
+      vPos: s.max ? 'fixed' : 'relative', vInset: s.max ? '0' : 'auto', vZ: s.max ? '60' : 'auto', vRadius: s.max ? '0' : '12px',
+      vpHeight: s.max ? 'calc(100vh - 118px)' : 'min(68vh, 700px)',
+      vpCursor: !img ? 'default' : s.dragging ? 'grabbing' : s.zoom > 1 ? 'grab' : 'crosshair',
+      viewModes,
+      zoomIn: () => img && this.zoomBy(1.25), zoomOut: () => img && this.zoomBy(0.8),
+      zoomLabel: s.zoom === 1 ? 'Fit' : Math.round(s.zoom * 100) + '%',
+      fit: () => this.setState({ zoom: 1, panX: 0, panY: 0 }),
+      resetView: () => this.setState({ zoom: 1, panX: 0, panY: 0, invert: false, opacity: 72, intensity: 60, compare: 50, showCam: true, view: 'overlay' }),
+      toggleInvert: () => this.setState(st => ({ invert: !st.invert })),
+      invBg: s.invert ? '#33414a' : 'transparent', invBorder: s.invert ? '#4a5a64' : '#2a343b',
+      toggleMax: () => this.setState(st => ({ max: !st.max })), maxLabel: s.max ? 'Exit full screen' : 'Full screen',
+      vpRef: this.vpRef, stageRef: this.stageRef, fileRef: this.fileRef, lungRef: this.lungRef, exploreRef: this.exploreRef,
+      onPointerDown: this.onPointerDown, onPointerMove: this.onPointerMove, onPointerUp: this.onPointerUp, onPointerLeave: this.onPointerLeave,
+      onHandleDown: this.onHandleDown, onDragOver: this.onDragOver, onDragLeave: this.onDragLeave, onDrop: this.onDrop,
+      stageW: stageW + 'px', stageH: stageH + 'px',
+      stageTransform: `translate(-50%, -50%) translate(${s.panX}px, ${s.panY}px) scale(${s.zoom})`,
+      stageTransition: s.dragging ? 'none' : 'transform .18s ease-out',
+      imgUrl: img ? img.url : '', imgBg: img ? `url("${img.url}")` : 'none', imgFilter: s.invert ? 'invert(1)' : 'none', imgAspect: img ? `${img.w} / ${img.h}` : '1 / 1',
+      heatUrl: D.heatUrl, heatBg: `url("${D.heatUrl}")`,
+      heatOpacity: heatOn && view !== 'original' ? s.opacity / 100 : 0,
+      heatClip: view === 'compare' ? `inset(0 0 0 ${s.compare}%)` : 'none',
+      isCompare: review && view === 'compare' && s.showCam, comparePct: s.compare + '%',
+      isScanning: analyzing && s.elapsed < 3200, scanTop: clamp((s.elapsed - 200) / 3000, 0, 1) * 100 + '%',
+      metaId: img ? 'Study ' + img.id : '', metaDims: img ? `${img.w} × ${img.h} px · ${img.format}` : '',
+      metaStatus: s.phase === 'quality' ? 'Quality check' : analyzing ? 'Processing…' : review ? 'Processed' : '',
+      metaStatusColor: review ? '#7fd3d8' : '#f0c27a',
+      hoverOpacity: hov ? 1 : 0, hoverPos: hov ? `x ${hov.x}  y ${hov.y} px` : '', hoverCam: camVal !== null ? `AI focus ${Math.round(camVal * 100)}%` : '',
+      dropTitle: s.dragOver ? 'Release to add the X-ray' : clin ? 'Drop a chest X-ray to begin' : 'Add your chest X-ray',
+      dropBorder: s.dragOver ? '#56c7cd' : '#2c373e', dropBg: s.dragOver ? 'rgba(86,199,205,0.08)' : 'transparent',
+      chooseFile: () => this.fileEl && this.fileEl.click(),
+      useSample: () => this.loadImage(SAMPLE_URL, { name: 'Sample PA radiograph', format: 'JPEG', size: null }),
+      onFile: (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) this.handleFile(f); },
+      hasError: !!s.err, errText: s.err || '',
+      controlsOpacity: review ? 1 : 0.45,
+      layers,
+      opacity: s.opacity, opacityLabel: s.opacity + '%', onOpacity: (e) => this.setState({ opacity: Number(e.target.value) }),
+      intensity: s.intensity, intensityLabel: s.intensity + '%', onIntensity: (e) => this.setState({ intensity: Number(e.target.value) }),
+
+      phaseUpload: s.phase === 'upload', phaseQuality: s.phase === 'quality', phaseAnalyzing: analyzing,
+      startTitle: clin ? 'Start a screening' : 'How this works',
+      startBody: clin ? 'Upload a PA chest radiograph. The model screens it for pneumonia patterns and flags results that need a closer look.' : 'The AI looks for patterns in chest X-rays that are often linked to pneumonia. A healthcare professional should always review the result.',
+      startPoints: (clin
+        ? [['Image check', 'Confirms the file is a readable chest X-ray.'], ['AI analysis', 'Looks for patterns linked to pneumonia and says how sure it is.'], ['Your review', 'See where the AI looked, then make your own read.']]
+        : [['Add your X-ray', 'Use a JPEG or PNG image of a chest X-ray.'], ['The AI takes a look', 'It takes a few seconds.'], ['See what it found', 'In plain language, with a picture of where it looked.']]).map(([title, text], i) => ({ n: i + 1, title, text })),
+      readyTitle: s.qStep < 4 ? 'Checking the image…' : warnings ? 'Image checked — with notes' : 'Image looks ready',
+      readyBody: s.qStep < 4 ? 'Running the checks this app can do on the file.' : warnings ? 'Some checks raised notes on the left. You can still run the screening; weigh the result accordingly.' : 'The file passed the checks this app can run. Start the AI screening when ready.',
+      runScreening: this.run, runDisabled: s.qStep < 4, runOpacity: s.qStep < 4 ? 0.45 : 1,
+      analyzingTitle: s.elapsed < 3200 ? (clin ? 'Analyzing' : 'The AI is looking') : (clin ? 'Building AI highlight' : 'Finding where it looked'),
+      progressLabel: Math.round(s.elapsed / TOTAL * 100) + '%', progressPct: (s.elapsed / TOTAL * 100) + '%',
+      subSteps,
+
+      showClinicianResult: review && clin, showPatientResult: review && !clin,
+      showSampleTag: this.props.showSampleTags !== false,
+      revealOpacity: s.revealed ? 1 : 0, revealTransform: s.revealed ? 'none' : 'translateY(8px)', revealTransform2: s.revealed ? 'none' : 'translateY(14px)',
+      findingTitle: isPn ? 'Pneumonia pattern detected' : isUnc ? 'Inconclusive — near the decision boundary' : 'No pneumonia pattern detected',
+      confWord: isUnc ? 'confidence · too close to call' : 'confidence',
+      resultRows: [
+        { k: 'How sure the AI is', v: band === 'Unavailable' ? 'Not available' : band === 'Low' ? 'High' : band === 'Medium' ? 'Medium' : 'Low', c: band === 'High' ? '#8a520a' : '#14191d' },
+        { k: 'Image check', v: !D.avail ? 'Not available' : allFlagged ? 'Unusual image' : 'Typical chest X-ray', c: allFlagged ? '#8a520a' : '#14191d' },
+        { k: 'Flagged for a second look', v: !D.avail ? 'Not available' : deferred ? 'Yes' : 'No', c: deferred ? '#8a520a' : '#14191d' }
+      ],
+      toggleCam: () => review && this.setState(st => ({ showCam: !st.showCam, view: st.view === 'original' ? 'overlay' : st.view })),
+      camTrack: s.showCam && review ? '#3cb1b8' : '#3a474f', camKnob: s.showCam && review ? '17px' : '3px',
+      focusPlain: focus ? 'Strongest focus: ' + sideName(focus).toLowerCase() + ' (approximate)' : 'The AI\u2019s focus is spread out rather than in one area.',
+      hasFocusPlain: review && (!!focus || isPn),
+      abstained: review && isUnc, cautionOod: review && allFlagged,
+      techOpen: s.techOpen, toggleTech: () => this.setState(st => ({ techOpen: !st.techOpen })), techLabel: s.techOpen ? 'Hide technical details' : 'Show technical details',
+      techRows: [
+        ['Model version', m.label],
+        ['Predicted label', label],
+        ['P(pneumonia), calibrated', D.p.toFixed(4)],
+        ['Decision threshold', D.thr.toFixed(2) + (m.thr ? ' (from validation set)' : ' (default)')],
+        ['Abstained', D.abstained ? 'Yes' : 'No'],
+        ['Predictive entropy / deferral threshold', D.avail ? D.entropyRatio.toFixed(2) + ' × threshold' : 'Unavailable'],
+        ['Deferred for review', D.avail ? (deferred ? 'Yes' : 'No') : 'Unavailable'],
+        ['Grad-CAM target class', D.sc.label]
+      ].map(([k, v]) => ({ k, v })),
+      reviewBg: '#e9f3f3', reviewFg: '#0a5c61',
+      deferred: review && deferred,
+      confPct: pct(conf), confBar: s.revealed ? pct(conf) : '0%', band,
+      bandSegs: ['Low', 'Medium', 'High'].map(n => ({ bg: s.revealed && n === band ? (n === 'High' ? '#b36d12' : '#14191d') : '#eef1f2' })),
+      bandNote: band === 'Unavailable' ? 'Deferral calibration isn\u2019t available for this model — treat as unchecked, not as low.' : '',
+      hasBandNote: band === 'Unavailable',
+      summaryRows: [
+        { k: 'Model', v: fed ? 'DenseNet121 · federated learning' : 'DenseNet121 · centralized' },
+        { k: 'Training', v: '3 participating hospitals' },
+        { k: 'Privacy', v: privacyText },
+        { k: 'Uncertainty deferral', v: !D.avail ? 'Unavailable for this model' : deferred ? 'Triggered — among the least certain 10%' : 'Not triggered' }
+      ],
+      nextSteps,
+      viewOriginal: () => this.setState({ view: 'original' }), viewOverlay: () => this.setState({ view: 'overlay', showCam: true }),
+      camDetail: focus ? `Target class “${sc.label}”. Strongest response near the ${sideName(focus).toLowerCase()} (approximate).` : D.peakOutside ? `Target class “${sc.label}”. Strongest response falls outside the lung fields — interpret with care.` : `Target class “${sc.label}”. Attention is diffuse rather than focal.`,
+      oodRows,
+      oodSummary: !D.avail ? 'Unavailable for this model' : allFlagged ? 'Unlike all 3 hospitals' : `Recognised by ${3 - flags} of 3`,
+      oodSummaryColor: !D.avail ? '#5b656d' : allFlagged ? '#8a520a' : TEAL,
+      oodNote: 'Each detector was trained only on its own hospital\u2019s images, so a real X-ray often looks unusual to the other hospitals. Caution is raised only when no hospital recognises it.',
+
+      patientHeadline: isPn ? 'The AI noticed patterns often seen with pneumonia' : isUnc ? 'The AI couldn\u2019t decide either way' : 'The AI did not notice patterns commonly seen with pneumonia',
+      patientBody: isPn ? 'The AI detected patterns in this X-ray that are commonly associated with pneumonia. This is not a diagnosis — only a healthcare professional can tell what it means for you.' : isUnc ? 'The result was too close to call, so the AI isn\u2019t giving an answer. A healthcare professional should look at this X-ray.' : 'The AI did not find the patterns it has learned to link with pneumonia. This does not rule anything out.',
+      sureBand: band === 'Unavailable' ? 'Not measured' : band === 'Low' ? 'High' : band === 'Medium' ? 'Medium' : 'Low',
+      sureSegs: ['Low', 'Medium', 'High'].map(n => { const sb = band === 'Low' ? 'High' : band === 'Medium' ? 'Medium' : band === 'High' ? 'Low' : null; return { name: n, bg: s.revealed && n === sb ? (n === 'Low' ? '#b36d12' : TEAL) : '#eef1f2', fg: n === sb ? '#14191d' : '#8a959b' }; }),
+      whyTitle: isPn ? 'Why did the AI flag this image?' : 'Where did the AI look?',
+      patientImageCheck: !D.avail ? 'This model version can\u2019t check whether your X-ray is similar to the images it learned from.' : allFlagged ? 'Your X-ray looks different from all the images the AI learned from, so its result may be less reliable.' : 'Your X-ray looks similar to images the AI learned from.',
+
+      isClinician: clin,
+      anatomyTitle: clin ? '3D anatomical visualization' : 'Understand your lungs',
+      anatomySub: clin ? 'Lungs, trachea and bronchi with approximate zones. Hover for labels.' : 'Turn the model and pick a region to learn about it.',
+      lungFront: () => this.lungView('front'), lungSide: () => this.lungView('side'), lungReset: () => { this.lungView('reset'); this.setState({ sel: null }); },
+      hasFocus: review && !!focus, focusLegend: clin ? 'Strongest AI focus (approximate)' : 'Where the AI looked most (approximate)',
+      focusText: !review ? 'After analysis, the lung zone where the AI focused most is highlighted here.' : focus ? `Highlighted: ${sideName(focus).toLowerCase()}, based on where the AI looked on the X-ray. Approximate — not a 3D reconstruction.` : 'No zone highlighted — the AI did not focus on one area.',
+      zoneChips: zones.map(z => ({
+        label: z[0].toUpperCase() + z.slice(1) + ' lung', onClick: () => this.setState(st => ({ zoneSel: st.zoneSel === z ? null : z })),
+        bg: s.zoneSel === z ? '#e4f1f1' : '#ffffff', fg: s.zoneSel === z ? '#0a5c61' : '#14191d', border: s.zoneSel === z ? '#9fd0d3' : '#d8dee2'
+      })),
+      hasZoneSel: !!s.zoneSel, zoneTitle: s.zoneSel ? EDU[s.zoneSel][0] : '', zoneText: s.zoneSel ? EDU[s.zoneSel][1] : '',
+
+      flSub: fed ? 'Model training uses federated learning and secure aggregation so participating sites can collaborate without sharing their training images.' : 'This comparison model was trained the traditional way, with images from all three hospitals pooled in one place.',
+      flNodes: [{ name: 'Hospital A', data: 'Kermany dataset' }, { name: 'Hospital B', data: 'RSNA dataset' }, { name: 'Hospital C', data: 'RSNA dataset' }],
+      flNodeNote: fed ? 'Images stay here' : 'Images sent out', flNodeColor: fed ? TEAL : '#8a520a',
+      flowLeft: h(FlowLeft, { central: !fed }), flowRight: h(FlowRight),
+      aggName: !fed ? 'Central training' : m.sec ? 'Secure aggregation' : 'FedAvg server',
+      aggNote: !fed ? 'Trains on pooled images' : m.sec ? 'Sees only the combined update' : 'Averages model updates',
+      aggBg: fed ? '#e4f1f1' : '#fbf0dc', aggBorder: fed ? '#c4e0e1' : '#f0dcb4', aggFg: fed ? '#0a5c61' : '#7a4d0b',
+      flFacts: fed ? [{ dot: TEAL, text: 'Images stay at each participating site.' }, { dot: '#d49a3f', text: 'Only model updates are aggregated, then the improved model is sent back.' }] : [{ dot: '#b36d12', text: 'Raw images leave each hospital.' }, { dot: '#8a959b', text: 'Shown for comparison only — not a privacy-preserving option.' }],
+      layersTitle: 'Protection in this model',
+      protections: [
+        { name: 'Federated learning', detail: 'Protects raw images — they never leave local storage.', on: fed },
+        { name: 'Differential privacy', detail: m.dp ? `Noise added to each update (ε = ${m.dp}; lower is stronger).` : 'Limits what an update reveals about any one patient.', on: !!m.dp },
+        { name: 'Secure aggregation', detail: 'The server can\u2019t see any single hospital\u2019s update.', on: !!m.sec },
+        { name: 'TLS + client authentication', detail: 'Encrypts messages in transit and verifies each hospital.', on: fed }
+      ].map(l => ({ ...l, state: l.on ? 'On' : 'Off', bg: l.on ? '#e4f1f1' : '#f0f2f3', fg: l.on ? TEAL : '#7a848b' })),
+
+      howSteps: [
+        ['Upload X-ray', 'Add a JPEG or PNG chest X-ray. DICOM files are decoded by the backend service.'],
+        ['Image quality check', 'The app checks the file can be read, its format, resolution, and whether it is grayscale.'],
+        ['AI analysis', 'The AI looks for patterns linked to pneumonia several times over. If its answers disagree, it reports lower certainty and flags the X-ray for a second look.'],
+        ['Explainability', 'Grad-CAM highlights the areas that most influenced the prediction. It shows attention, not a diagnosis or an outline of disease.'],
+        ['Review results', 'A clinician reviews every result. The most uncertain cases are flagged for closer review.']
+      ].map(([title, text], i) => ({ n: String(i + 1).padStart(2, '0'), title, text })),
+      howLayers: [
+        { name: 'Federated learning', protects: 'Raw patient images', how: 'Images never leave local storage' },
+        { name: 'Differential privacy', protects: 'Information inside an update', how: 'DP-SGD with a reported privacy budget (ε, δ)' },
+        { name: 'Secure aggregation', protects: 'One hospital\u2019s update, from the server', how: 'Masked updates; server sees only the sum' },
+        { name: 'TLS + client auth', protects: 'Messages in transit', how: 'Encrypted, authenticated connections' }
+      ],
+      limitations: [
+        'Hospitals are simulated, not a real cross-institutional deployment.',
+        'The frozen backbone limits accuracy compared with full fine-tuning.',
+        'The differential privacy used is effectively local DP, which costs more accuracy than central DP at the same ε.',
+        'Monte Carlo dropout is a known-weak uncertainty estimate and may be poorly calibrated.'
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

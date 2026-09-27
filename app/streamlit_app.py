@@ -40,12 +40,41 @@ from app import components as c
 from app import inference, results_loader, theme
 from src.data.feature_cache import FeatureCacheKey
 
+# TEMPORARY (Phase 0 of the PneumoScan redesign, see the plan at
+# /home/uddhav/.claude/plans/synchronous-scribbling-llama.md): gated behind
+# a query param so normal visitors never see it. Verifies the custom
+# component's bytes round-trip and iframe-sizing approach work on the real
+# Streamlit Cloud deployment, not just locally, before Phase 1 replaces this
+# entire file's UI. Remove this block (and app/pneumoscan_component's spike
+# App.tsx) once Phase 0's Cloud exit criterion is confirmed and Phase 1 begins.
+_phase0_spike = "phase0_spike" in st.query_params
+
 st.set_page_config(
     page_title="PneumoFL — AI-Assisted Chest X-ray Analysis",
     page_icon="🫁",
-    layout="centered",
+    layout="wide" if _phase0_spike else "centered",
     initial_sidebar_state="collapsed",
 )
+
+if _phase0_spike:
+    from app.pneumoscan_component import pneumoscan
+
+    st.markdown(
+        """
+        <style>
+        header[data-testid="stHeader"] { display: none; }
+        div[data-testid="stAppViewContainer"] { padding: 0 !important; }
+        div[data-testid="stMainBlockContainer"] { padding: 0 !important; max-width: 100% !important; }
+        div[data-testid="stMain"] { overflow: hidden !important; }
+        html, body { overflow: hidden !important; }
+        iframe { display: block; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    _event = pneumoscan({"message": "hello from Cloud", "image_b64": None}, key="phase0_spike")
+    st.stop()
+
 st.markdown(theme.CSS, unsafe_allow_html=True)
 
 CFG = OmegaConf.load(REPO_ROOT / "conf" / "app.yaml")
