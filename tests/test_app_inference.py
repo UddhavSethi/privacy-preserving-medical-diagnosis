@@ -9,13 +9,17 @@ required, which is the whole point of keeping Streamlit out of that module.
 """
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 
 import cv2
 import numpy as np
+import pydicom
 import pytest
 import torch
+from pydicom.dataset import FileDataset, FileMetaDataset
+from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from app import inference
 
@@ -165,3 +169,170 @@ def test_run_full_inference_end_to_end_shape_and_types():
     assert abstained_result.abstained is True
     assert abstained_result.predicted_label == inference.UNCERTAIN_LABEL
     assert abstained_result.predicted_class is None
+
+    # PneumoScan redesign (docs/pneumoscan_redesign_plan.md Phase 1A): the raw
+    # Grad-CAM heatmap must actually be exposed now, not silently discarded
+    # (the exact bug this field was added to fix).
+    assert result.gradcam_heatmap.shape == (224, 224)
+    assert result.gradcam_heatmap.dtype == np.float32
+    assert 0.0 <= float(result.gradcam_heatmap.min())
+    assert float(result.gradcam_heatmap.max()) <= 1.0
+    assert result.gradcam_target_class in (inference.NORMAL_CLASS_INDEX, inference.PNEUMONIA_CLASS_INDEX)
+
+
+# ---------------------------------------------------------------------------
+# PneumoScan redesign (docs/pneumoscan_redesign_plan.md, Phase 1A) additions
+# ---------------------------------------------------------------------------
+
+
+def test_supported_upload_extensions_includes_dicom_and_dot_dicom():
+    """The pre-existing bug this constant was added to fix: the old file
+    uploader's own extension list had ".dcm" but not ".dicom", despite the
+    decoder always supporting both."""
+    assert ".dcm" in inference.SUPPORTED_UPLOAD_EXTENSIONS
+    assert ".dicom" in inference.SUPPORTED_UPLOAD_EXTENSIONS
+    assert ".jpg" in inference.SUPPORTED_UPLOAD_EXTENSIONS
+    assert ".jpeg" in inference.SUPPORTED_UPLOAD_EXTENSIONS
+    assert ".png" in inference.SUPPORTED_UPLOAD_EXTENSIONS
+
+
+def _make_synthetic_dicom_bytes(rows: int = 64, cols: int = 64, view_position: str | None = None) -> bytes:
+    """A minimal, valid, in-memory DICOM file — no real patient data, no
+    fixture file on disk (portable to CI, same reasoning as this file's
+    existing synthetic-noise X-ray-gate test)."""
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = generate_uid()
+    file_meta.MediaStorageSOPInstanceUID = generate_uid()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    ds = FileDataset(None, {}, file_meta=file_meta, preamble=b"\x00" * 128)
+    ds.Rows = rows
+    ds.Columns = cols
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.BitsAllocated = 16
+    ds.BitsStored = 16
+    ds.HighBit = 15
+    ds.PixelRepresentation = 0
+    if view_position is not None:
+        ds.ViewPosition = view_position
+    pixel_array = np.random.default_rng(0).integers(0, 4096, size=(rows, cols), dtype=np.uint16)
+    ds.PixelData = pixel_array.tobytes()
+    ds.is_little_endian = True
+    ds.is_implicit_VR = False
+
+    buf = io.BytesIO()
+    ds.save_as(buf, enforce_file_format=True)
+    return buf.getvalue()
+
+
+def test_decode_uploaded_image_with_meta_dicom_extracts_projection():
+    dicom_bytes = _make_synthetic_dicom_bytes(rows=48, cols=32, view_position="PA")
+    bgr, meta = inference.decode_uploaded_image_with_meta(dicom_bytes, "upload.dcm")
+    assert bgr.shape == (48, 32, 3)
+    assert meta.format == "DICOM"
+    assert meta.width == 32
+    assert meta.height == 48
+    assert meta.projection == "PA"
+
+
+def test_decode_uploaded_image_with_meta_dicom_dotdicom_extension():
+    """The `.dicom` extension specifically (not just `.dcm`) must decode too."""
+    dicom_bytes = _make_synthetic_dicom_bytes(rows=32, cols=32)
+    bgr, meta = inference.decode_uploaded_image_with_meta(dicom_bytes, "upload.dicom")
+    assert bgr.shape == (32, 32, 3)
+    assert meta.format == "DICOM"
+
+
+def test_decode_uploaded_image_with_meta_dicom_no_projection_tag():
+    """No ViewPosition tag present -> None, never a guessed/default value."""
+    dicom_bytes = _make_synthetic_dicom_bytes(rows=32, cols=32, view_position=None)
+    _, meta = inference.decode_uploaded_image_with_meta(dicom_bytes, "upload.dcm")
+    assert meta.projection is None
+
+
+def test_decode_uploaded_image_with_meta_jpeg_never_fabricates_projection():
+    synthetic = np.random.default_rng(0).integers(0, 256, size=(64, 96, 3), dtype=np.uint8)
+    jpeg_bytes = _encode_jpeg_bytes(synthetic)
+    bgr, meta = inference.decode_uploaded_image_with_meta(jpeg_bytes, "upload.jpg")
+    assert bgr.shape == (64, 96, 3)
+    assert meta.format == "JPEG"
+    assert meta.width == 96
+    assert meta.height == 64
+    assert meta.projection is None  # JPEG carries no such tag -- must never be guessed
+
+
+@requires_real_artifacts
+def test_run_full_inference_progress_callback_fires_all_stages_in_order():
+    model = inference.load_classifier(CENTRALIZED_CHECKPOINT)
+    synthetic_bgr = np.random.default_rng(2).integers(0, 256, size=(224, 224, 3), dtype=np.uint8)
+
+    events: list[tuple[str, str]] = []
+
+    def callback(stage: str, event: str) -> None:
+        events.append((stage, event))
+
+    inference.run_full_inference(
+        model,
+        synthetic_bgr,
+        deferral_threshold=float("inf"),
+        ood_detectors={},
+        ood_thresholds={},
+        num_mc_passes=3,
+        progress_callback=callback,
+    )
+
+    assert events == [
+        ("preprocess", "start"),
+        ("preprocess", "done"),
+        ("mc_dropout", "start"),
+        ("mc_dropout", "done"),
+        ("ood", "start"),
+        ("ood", "done"),
+        ("gradcam", "start"),
+        ("gradcam", "done"),
+    ]
+    assert tuple(s for s, _ in events[::2]) == inference.INFERENCE_STAGES
+
+
+@requires_real_artifacts
+def test_run_full_inference_identical_results_with_and_without_callback():
+    """The progress callback must be purely observational -- reordering OOD
+    before Grad-CAM (to match the design's step order) must not change any
+    computed output, since the two steps are independent."""
+    model = inference.load_classifier(CENTRALIZED_CHECKPOINT)
+    synthetic_bgr = np.random.default_rng(3).integers(0, 256, size=(224, 224, 3), dtype=np.uint8)
+
+    kwargs = dict(
+        deferral_threshold=0.5,
+        ood_detectors={},
+        ood_thresholds={},
+        num_mc_passes=3,
+    )
+    result_no_callback = inference.run_full_inference(model, synthetic_bgr, **kwargs)
+    result_with_callback = inference.run_full_inference(model, synthetic_bgr, progress_callback=lambda *_: None, **kwargs)
+
+    assert result_no_callback.predicted_label == result_with_callback.predicted_label
+    assert result_no_callback.prob_pneumonia == pytest.approx(result_with_callback.prob_pneumonia)
+    assert result_no_callback.entropy == pytest.approx(result_with_callback.entropy)
+    np.testing.assert_array_equal(result_no_callback.gradcam_heatmap, result_with_callback.gradcam_heatmap)
+
+
+def test_check_is_xray_accepts_a_shared_frozen_model():
+    """PneumoScan redesign Phase 1A: the new `frozen_model` param must be
+    usable to skip rebuilding a fresh DenseNet121Head on every call, and
+    produce the same result as the default (no param) path."""
+    if not inference.XRAY_GATE_WEIGHTS_PATH.exists():
+        pytest.skip("requires committed xray_gate_weights.json")
+    from src.models.densenet_head import DenseNet121Head
+
+    rng = np.random.default_rng(123)
+    noise_bgr = rng.integers(0, 256, size=(224, 224, 3), dtype=np.uint8)
+    gate = inference.load_xray_gate()
+
+    shared_model = DenseNet121Head()
+    result_shared = inference.check_is_xray(noise_bgr, gate, frozen_model=shared_model)
+    result_default = inference.check_is_xray(noise_bgr, gate)
+
+    assert result_shared.is_xray == result_default.is_xray
+    assert result_shared.p_xray == pytest.approx(result_default.p_xray)

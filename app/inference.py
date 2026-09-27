@@ -19,6 +19,7 @@ import hashlib
 import io
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -48,6 +49,22 @@ SUPPORTED_DICOM_EXTENSIONS = (".dcm", ".dicom")
 DEFAULT_DECISION_THRESHOLD = 0.5  # unchanged default for every checkpoint that
                                    # doesn't specify its own (conf/app.yaml)
 
+# PneumoScan redesign (docs/pneumoscan_redesign_plan.md, Phase 1A): single
+# source of truth for which upload extensions the app accepts. Previously
+# the file uploader's own `type=[...]` list (app/streamlit_app.py) only had
+# ".dcm", silently rejecting ".dicom" uploads despite decode_uploaded_image
+# supporting them via SUPPORTED_DICOM_EXTENSIONS above -- a real, if minor,
+# pre-existing bug, fixed by having both places import this one constant.
+SUPPORTED_UPLOAD_EXTENSIONS = (".jpg", ".jpeg", ".png", *SUPPORTED_DICOM_EXTENSIONS)
+
+# The 5 real, independently-timed stages of run_full_inference a progress
+# callback can observe (Phase 1A) -- deliberately not finer-grained than
+# this: MC Dropout's T passes run in milliseconds on the 1024-d pooled
+# features (see the plan's own note), so per-pass progress would just be
+# fake precision, not real signal a caller can act on.
+INFERENCE_STAGES = ("preprocess", "mc_dropout", "ood", "gradcam")
+ProgressCallback = Callable[[str, str], None]  # (stage, "start" | "done")
+
 
 def decode_uploaded_image(file_bytes: bytes, filename: str) -> np.ndarray:
     """Decodes an uploaded file into a BGR uint8 array — the same format
@@ -66,6 +83,42 @@ def decode_uploaded_image(file_bytes: bytes, filename: str) -> np.ndarray:
     if bgr is None:
         raise ValueError(f"Could not decode image: {filename}")
     return bgr
+
+
+@dataclass(frozen=True)
+class DecodedMeta:
+    format: str  # "DICOM" | "JPEG" | "PNG" | the raw suffix, uppercased
+    width: int
+    height: int
+    projection: str | None  # DICOM ViewPosition (e.g. "PA", "AP", "LL") when present, else None
+
+
+def decode_uploaded_image_with_meta(file_bytes: bytes, filename: str) -> tuple[np.ndarray, DecodedMeta]:
+    """Same decoding as `decode_uploaded_image`, plus the real study metadata
+    the PneumoScan redesign's Study card needs (docs/pneumoscan_redesign_plan.md
+    Phase 1A/1C: `study.format`/`width`/`height`/`projection`). Never invents a
+    projection for JPEG/PNG uploads -- those formats carry no such tag, so
+    `projection` is None (the UI layer renders that as "Not recorded", not a
+    guess). `decode_uploaded_image` itself is left untouched so every existing
+    caller/test keeps working unmodified."""
+    suffix = Path(filename).suffix.lower()
+    if suffix in SUPPORTED_DICOM_EXTENSIONS:
+        ds = pydicom.dcmread(io.BytesIO(file_bytes))
+        uint8_img = window_pixel_array_to_uint8(ds.pixel_array)
+        bgr = cv2.cvtColor(uint8_img, cv2.COLOR_GRAY2BGR)
+        projection = str(ds.get("ViewPosition", "")) or None
+        meta = DecodedMeta(format="DICOM", width=bgr.shape[1], height=bgr.shape[0], projection=projection)
+        return bgr, meta
+
+    buffer = np.frombuffer(file_bytes, dtype=np.uint8)
+    bgr = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise ValueError(f"Could not decode image: {filename}")
+    fmt = suffix.lstrip(".").upper() or "UNKNOWN"
+    if fmt == "JPG":
+        fmt = "JPEG"
+    meta = DecodedMeta(format=fmt, width=bgr.shape[1], height=bgr.shape[0], projection=None)
+    return bgr, meta
 
 
 def load_classifier(checkpoint_path: Path, fine_tune_last_block: bool = False) -> DenseNet121Head:
@@ -94,7 +147,9 @@ def load_xray_gate():
     return load_gate_weights(XRAY_GATE_WEIGHTS_PATH)
 
 
-def check_is_xray(bgr_image: np.ndarray, gate, image_size: int = 224) -> XrayGateResult:
+def check_is_xray(
+    bgr_image: np.ndarray, gate, image_size: int = 224, frozen_model: DenseNet121Head | None = None
+) -> XrayGateResult:
     """Runs the gate against a FRESH, always-frozen backbone — deliberately
     NOT whichever checkpoint the user has selected for diagnosis. The gate was
     trained on Stage 9's cached pooled features, which are a frozen-backbone
@@ -104,8 +159,14 @@ def check_is_xray(bgr_image: np.ndarray, gate, image_size: int = 224) -> XrayGat
     than it was trained on — the exact mismatch already found and disabled for
     deferral/OOD. A plain, un-checkpointed DenseNet121Head's backbone is always
     the same frozen ImageNet weights regardless of which classifier head is
-    loaded, so no checkpoint is needed here at all."""
-    frozen_model = DenseNet121Head()
+    loaded, so no checkpoint is needed here at all.
+
+    `frozen_model` (PneumoScan redesign, Phase 1A): pass in a cached
+    `DenseNet121Head()` instance to skip rebuilding one (and re-downloading/
+    re-initializing ImageNet weights) on every single call -- every prior
+    caller (default `None`) keeps building a fresh one, unchanged."""
+    if frozen_model is None:
+        frozen_model = DenseNet121Head()
     _, tensor = preprocess_image(bgr_image, image_size=image_size)
     with torch.no_grad():
         pooled_features = frozen_model.pooled_features(tensor).numpy()[0]
@@ -126,6 +187,13 @@ class InferenceResult:
                       # decision threshold — predicted_label is "Uncertain", not forced
     decision_threshold: float
     gradcam_overlay_rgb: np.ndarray
+    gradcam_heatmap: np.ndarray  # (224, 224) float32 in [0,1] -- PneumoScan redesign Phase 1A:
+                                  # the RAW map (pre-colorization/blend), so the frontend can
+                                  # colorize it client-side for the opacity/intensity sliders
+                                  # and find its peak for the 3D focus point. Previously computed
+                                  # (generate_overlay always returns it) but discarded here.
+    gradcam_target_class: int  # which class's activation the heatmap explains (PNEUMONIA_CLASS_INDEX
+                                # or NORMAL_CLASS_INDEX) -- not always predicted_class, see `abstained`
     ood_flags: dict[str, bool]  # per hospital: True = flagged out-of-distribution
     ood_scores: dict[str, float]
 
@@ -150,24 +218,45 @@ def run_full_inference(
     decision_threshold: float = DEFAULT_DECISION_THRESHOLD,
     abstention_half_width: float = 0.0,
     temperature: float = 1.0,
+    progress_callback: ProgressCallback | None = None,
 ) -> InferenceResult:
     """End-to-end single-image inference: preprocessing -> pooled features ->
     MC Dropout (prediction + confidence + uncertainty, Stage 19's own design,
     not a second point-estimate path) -> temperature calibration -> decision
-    threshold + abstention band -> deferral -> Grad-CAM -> per-hospital OOD
-    check. Every step calls directly into the existing, already-tested modules —
-    this function only sequences them for one new image.
+    threshold + abstention band -> deferral -> per-hospital OOD check ->
+    Grad-CAM. Every step calls directly into the existing, already-tested
+    modules — this function only sequences them for one new image.
 
     `decision_threshold`/`abstention_half_width`/`temperature` default to 0.5 /
     0.0 / 1.0 (the prior behavior — argmax at 0.5, no abstention, no
     calibration) for every checkpoint that doesn't specify its own values in
     conf/app.yaml; see docs/adr1_groupnorm_fallback.md sec. 10 for how round
-    9's own values were derived, entirely from its validation set."""
-    rgb_image, tensor = preprocess_image(bgr_image, image_size=image_size)
+    9's own values were derived, entirely from its validation set.
 
+    `progress_callback` (PneumoScan redesign, Phase 1A): called as
+    `callback(stage, "start")` then `callback(stage, "done")` around each of
+    INFERENCE_STAGES, for a caller (`app/analysis_job.py`) to report real
+    progress instead of a fake timer. Exceptions raised inside the callback
+    propagate uncaught -- silently swallowing them would hide a real bug in
+    whatever's consuming progress, not just a cosmetic one. OOD now runs
+    BEFORE Grad-CAM (previously the reverse) to match the design's own
+    gate->preprocess->MC->OOD->Grad-CAM ordering; the two steps are
+    independent (OOD only needs pooled_features, already computed by the
+    time either runs), so this reorder changes no output, only the order two
+    unrelated computations happen in — see test_app_inference.py's
+    identical-output-regardless-of-callback/order test."""
+
+    def _report(stage: str, event: str) -> None:
+        if progress_callback is not None:
+            progress_callback(stage, event)
+
+    _report("preprocess", "start")
+    rgb_image, tensor = preprocess_image(bgr_image, image_size=image_size)
     with torch.no_grad():
         pooled_features = model.pooled_features(tensor)  # (1, 1024)
+    _report("preprocess", "done")
 
+    _report("mc_dropout", "start")
     # MC Dropout's T stochastic passes are otherwise unseeded, so re-analyzing
     # the SAME uploaded image gave a different confidence (and occasionally a
     # different Uncertain/not verdict) every time — found live, 2026-09-02.
@@ -193,15 +282,20 @@ def run_full_inference(
         predicted_label = CLASS_NAMES[predicted_class]
         confidence = prob_pneumonia if predicted_class == PNEUMONIA_CLASS_INDEX else 1.0 - prob_pneumonia
         gradcam_target_class = predicted_class
+    _report("mc_dropout", "done")
 
-    overlay = generate_overlay(model, rgb_image, target_class=gradcam_target_class, image_size=image_size)
-
+    _report("ood", "start")
     features_np = pooled_features.numpy()
     ood_flags, ood_scores = {}, {}
     for hospital, detector in ood_detectors.items():
         score = float(compute_anomaly_scores(detector, features_np)[0])
         ood_scores[hospital] = score
         ood_flags[hospital] = bool(flag_ood(np.array([score]), ood_thresholds[hospital])[0])
+    _report("ood", "done")
+
+    _report("gradcam", "start")
+    overlay = generate_overlay(model, rgb_image, target_class=gradcam_target_class, image_size=image_size)
+    _report("gradcam", "done")
 
     return InferenceResult(
         rgb_image=rgb_image,
@@ -215,6 +309,8 @@ def run_full_inference(
         abstained=abstained,
         decision_threshold=decision_threshold,
         gradcam_overlay_rgb=overlay.overlay_rgb,
+        gradcam_heatmap=overlay.heatmap.astype(np.float32),
+        gradcam_target_class=gradcam_target_class,
         ood_flags=ood_flags,
         ood_scores=ood_scores,
     )
