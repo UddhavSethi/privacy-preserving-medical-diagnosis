@@ -1,120 +1,195 @@
-// Phase 0 spike: proves two risky things work on the REAL Streamlit Cloud
-// deployment before any real UI is built on top of them.
-//
-//   1. Bytes round-trip: Python -> JS (an image arg) and JS -> Python (an
-//      uploaded-file event), matching the final design's upload flow.
-//   2. Full-viewport iframe layout: a sticky header, a scrollable body, and
-//      a position:fixed overlay all behave correctly when the iframe is
-//      pinned to the real window height instead of auto-sizing to content.
-//
-// This file is intentionally thrown away once Phase 0's exit criteria pass
-// (see the plan: "round-trip works on the live Cloud URL, not just
-// locally") -- it is not meant to survive into Phase 1's real screens.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ComponentProps } from "streamlit-component-lib";
 import { withStreamlitConnection } from "streamlit-component-lib";
-import { markReady, sendEvent, syncFrameHeightToViewport } from "./bridge";
+import { fileToBase64, markReady, sendEvent, syncFrameHeightToViewport } from "./bridge";
+import type { PneumoScanArgs, UploadPayload } from "./contract";
+import { useObjectUrl, useStableBytes } from "./lib/useObjectUrl";
+import { Header, type Mode } from "./components/Header";
+import { StepBar } from "./components/StepBar";
+import { StudyCard } from "./components/StudyCard";
+import { ImageCheckCard } from "./components/ImageCheckCard";
+import { UploadIntro } from "./components/right/UploadIntro";
+import { QualityCard } from "./components/right/QualityCard";
+import { AnalyzingCard } from "./components/right/AnalyzingCard";
+import { ResultClinician } from "./components/right/ResultClinician";
+import { ResultPatient } from "./components/right/ResultPatient";
+import { WhereAILooked } from "./components/right/WhereAILooked";
+import { RejectedCard } from "./components/right/RejectedCard";
+import { XrayViewer, type ViewMode } from "./viewer/XrayViewer";
 
-interface SpikeArgs {
-  image_b64?: string;
-  message?: string;
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(query.matches);
+    const listener = () => setReduced(query.matches);
+    query.addEventListener("change", listener);
+    return () => query.removeEventListener("change", listener);
+  }, []);
+  return reduced;
 }
 
 function App({ args }: ComponentProps): JSX.Element {
-  const typedArgs = args as SpikeArgs;
-  const [scrollProbe, setScrollProbe] = useState(0);
-  const [lastSent, setLastSent] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const data = (args as PneumoScanArgs).data;
+  const rawArgs = args as PneumoScanArgs;
 
   useEffect(() => {
     markReady();
     return syncFrameHeightToViewport();
   }, []);
 
-  const handleFile = async (file: File) => {
-    const buf = new Uint8Array(await file.arrayBuffer());
-    const b64 = bytesToBase64(buf);
-    sendEvent("upload", { name: file.name, mime: file.type, size: buf.length, data_b64: b64 });
-    setLastSent(`${file.name} (${buf.length} bytes)`);
+  const reducedMotion = usePrefersReducedMotion();
+  const [mode, setMode] = useState<Mode>("clinician");
+  const [viewMode, setViewMode] = useState<ViewMode>("original");
+  const [aiHighlightOn, setAiHighlightOn] = useState(true);
+  const [opacity, setOpacity] = useState(0.75);
+  const [highlightArea, setHighlightArea] = useState(0);
+  const [comparePct, setComparePct] = useState(50);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [clientError, setClientError] = useState<string | null>(null);
+
+  const displayImageUrl = useObjectUrl(rawArgs.display_image, "image/jpeg");
+  const heatmapRaw = useStableBytes(rawArgs.heatmap);
+
+  // A genuinely new study (new upload, or back to "upload") resets every
+  // client-only viewer preference -- otherwise e.g. "Compare" mode or a
+  // zoomed-in view would silently carry over onto an unrelated image.
+  const studyId = data.study?.study_id ?? null;
+  useEffect(() => {
+    setViewMode("original");
+    setAiHighlightOn(true);
+    setOpacity(0.75);
+    setHighlightArea(0);
+    setComparePct(50);
+    setIsFullscreen(false);
+    setClientError(null);
+  }, [studyId]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isFullscreen) setIsFullscreen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isFullscreen]);
+
+  const onFileChosen = async (file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const data_b64 = await fileToBase64(bytes);
+    const payload: UploadPayload = { name: file.name, mime: file.type, size: bytes.length, data_b64 };
+    sendEvent("upload", payload);
   };
+  const onUseSample = () => sendEvent("use_sample");
+  const onAnalyze = () => sendEvent("analyze");
+  const onNewScreening = () => sendEvent("new_screening");
+  const onDismissError = () => sendEvent("dismiss_error");
+
+  const hasImage = data.study !== null;
+  const pageTitle = mode === "clinician" ? "New screening" : "Check a chest X-ray";
+  const pageSub =
+    mode === "clinician"
+      ? "Upload a chest X-ray, run the AI screening model, and review its explanation."
+      : "Upload a chest X-ray photo to see what the AI notices.";
+
+  const focus = data.result?.focus ?? null;
+  const focusSpread = data.result?.focus_spread ?? true;
+
+  const rightPanel = useMemo(() => {
+    if (data.phase === "upload") return <UploadIntro mode={mode} />;
+    if (data.phase === "quality") return <QualityCard quality={data.quality} mode={mode} onAnalyze={onAnalyze} />;
+    if (data.phase === "analyzing") return <AnalyzingCard progress={data.progress} />;
+    if (data.phase === "rejected") return <RejectedCard quality={data.quality} onNewScreening={onNewScreening} />;
+    if (data.phase === "review" && data.result) {
+      return mode === "clinician" ? (
+        <>
+          <ResultClinician result={data.result} setViewMode={setViewMode} />
+          <WhereAILooked
+            study={data.study}
+            displayImageUrl={displayImageUrl}
+            heatmapRaw={heatmapRaw}
+            focus={focus}
+            focusSpread={focusSpread}
+            setViewMode={setViewMode}
+          />
+        </>
+      ) : (
+        <ResultPatient result={data.result} study={data.study} displayImageUrl={displayImageUrl} heatmapRaw={heatmapRaw} />
+      );
+    }
+    return null;
+  }, [data.phase, data.quality, data.progress, data.result, data.study, mode, displayImageUrl, heatmapRaw, focus, focusSpread]);
+
+  if (data.phase === "error") {
+    return (
+      <div className="psc-app">
+        <Header mode={mode} setMode={setMode} />
+        <main className="psc-error-main">
+          <section className="psc-card psc-card--warn psc-error-card">
+            <h2 className="psc-card-heading">Something went wrong</h2>
+            <p className="psc-card-body">{data.error ?? "An unexpected error occurred."}</p>
+            <button type="button" className="psc-btn psc-btn--primary" onClick={onDismissError}>
+              Start a new screening
+            </button>
+          </section>
+        </main>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", fontFamily: "sans-serif" }}>
-      <header
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 10,
-          background: "rgba(255,255,255,0.9)",
-          borderBottom: "1px solid #ddd",
-          padding: "10px 16px",
-        }}
-      >
-        <strong>PneumoScan Phase 0 spike</strong> — sticky header check (scroll offset: {scrollProbe}px)
-      </header>
-
-      <main
-        style={{ flex: 1, overflowY: "auto", padding: 16 }}
-        onScroll={(e) => setScrollProbe(Math.round((e.target as HTMLDivElement).scrollTop))}
-      >
-        <section style={{ marginBottom: 16 }}>
-          <h3>1. Python → JS (bytes arg)</h3>
-          <p>args.message = {JSON.stringify(typedArgs.message ?? null)}</p>
-          {typedArgs.image_b64 ? (
-            <img
-              src={`data:image/png;base64,${typedArgs.image_b64}`}
-              alt="from Python"
-              style={{ maxWidth: 240, border: "1px solid #ccc" }}
-            />
-          ) : (
-            <p>(no image arg received)</p>
+    <div className="psc-app">
+      <Header mode={mode} setMode={setMode} />
+      <main className="psc-main">
+        <div className="psc-page-head">
+          <div className="psc-page-head-text">
+            <h1 className="psc-page-title">{pageTitle}</h1>
+            <div className="psc-page-sub">{pageSub}</div>
+          </div>
+          {hasImage && (
+            <button type="button" className="psc-btn psc-btn--outline" onClick={onNewScreening}>
+              Start a new screening
+            </button>
           )}
-        </section>
+        </div>
 
-        <section style={{ marginBottom: 16 }}>
-          <h3>2. JS → Python (component value)</h3>
-          <input
-            ref={fileInputRef}
-            type="file"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void handleFile(f);
-            }}
+        <StepBar phase={data.phase} progress={data.progress} mode={mode} />
+
+        <div className="psc-columns">
+          <aside className="psc-col-left">
+            <StudyCard study={data.study} phase={data.phase} />
+            <ImageCheckCard quality={data.quality} />
+          </aside>
+
+          <XrayViewer
+            study={data.study}
+            displayImageUrl={displayImageUrl}
+            heatmapRaw={heatmapRaw}
+            focus={focus}
+            focusSpread={focusSpread}
+            phase={data.phase}
+            progressFraction={data.progress?.fraction ?? 0}
+            reducedMotion={reducedMotion}
+            onFileChosen={onFileChosen}
+            onUseSample={onUseSample}
+            clientError={clientError}
+            setClientError={setClientError}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
+            aiHighlightOn={aiHighlightOn}
+            setAiHighlightOn={setAiHighlightOn}
+            opacity={opacity}
+            setOpacity={setOpacity}
+            highlightArea={highlightArea}
+            setHighlightArea={setHighlightArea}
+            comparePct={comparePct}
+            setComparePct={setComparePct}
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={() => setIsFullscreen((v) => !v)}
           />
-          <p>Last sent: {lastSent ?? "(nothing yet)"}</p>
-          <button onClick={() => sendEvent("ping", { t: Date.now() })}>Send ping event</button>
-        </section>
 
-        <section style={{ height: 1400, background: "linear-gradient(#f4f6f7, #dfe4e6)" }}>
-          <p>Scroll probe filler — confirms the body scrolls independently of the sticky header
-             and that the iframe itself does not also scroll (it should stay pinned to the
-             viewport height set via setFrameHeight).</p>
-        </section>
+          <aside className="psc-col-right">{rightPanel}</aside>
+        </div>
       </main>
-
-      <div
-        style={{
-          position: "fixed",
-          bottom: 16,
-          right: 16,
-          background: "#0f7c83",
-          color: "white",
-          padding: "8px 14px",
-          borderRadius: 8,
-          fontSize: 13,
-        }}
-      >
-        position:fixed check
-      </div>
     </div>
   );
 }

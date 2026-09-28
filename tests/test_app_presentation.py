@@ -276,3 +276,70 @@ def test_result_props_never_returns_low_when_input_missing():
     props = presentation.result_props(result, calib)
     assert props["certainty"] != "Low"
     assert props["certainty"] is None
+
+
+# ---------------------------------------------------------------------------
+# quality_props
+# ---------------------------------------------------------------------------
+
+
+def test_quality_props_merges_checks_and_gate_unavailable():
+    bgr = np.zeros((512, 512, 3), dtype=np.uint8)
+    meta = DecodedMeta(format="JPEG", width=512, height=512, projection=None)
+    props = presentation.quality_props(bgr, meta, gate_result=None)
+    assert props["resolution_ok"] is True
+    assert props["xray_gate"] == {"status": "unavailable", "p_xray": None}
+
+
+def test_quality_props_gate_passed_and_failed():
+    from src.uncertainty.xray_gate import XrayGateResult
+
+    bgr = np.zeros((512, 512, 3), dtype=np.uint8)
+    meta = DecodedMeta(format="JPEG", width=512, height=512, projection=None)
+
+    passed = presentation.quality_props(bgr, meta, XrayGateResult(is_xray=True, p_xray=0.9))
+    assert passed["xray_gate"] == {"status": "passed", "p_xray": 0.9}
+
+    failed = presentation.quality_props(bgr, meta, XrayGateResult(is_xray=False, p_xray=0.1))
+    assert failed["xray_gate"] == {"status": "failed", "p_xray": 0.1}
+
+
+# ---------------------------------------------------------------------------
+# build_props
+# ---------------------------------------------------------------------------
+
+
+def test_build_props_defaults_absent_fields_to_none():
+    props = presentation.build_props(phase="upload")
+    assert props == {
+        "protocol_version": presentation.PROTOCOL_VERSION,
+        "phase": "upload",
+        "study": None,
+        "quality": None,
+        "progress": None,
+        "result": None,
+        "error": None,
+    }
+    json.dumps(props)
+
+
+def test_build_props_carries_through_every_section():
+    props = presentation.build_props(
+        phase="review",
+        study={"study_id": "PS-ABC123"},
+        quality={"resolution_ok": True},
+        progress={"fraction": 1.0},
+        result={"label": "Pneumonia"},
+        error=None,
+    )
+    assert props["phase"] == "review"
+    assert props["study"]["study_id"] == "PS-ABC123"
+    assert props["result"]["label"] == "Pneumonia"
+    json.dumps(props)
+
+
+def test_build_props_error_phase():
+    props = presentation.build_props(phase="error", error="Could not decode image: bad.jpg")
+    assert props["phase"] == "error"
+    assert props["error"] == "Could not decode image: bad.jpg"
+    assert props["result"] is None

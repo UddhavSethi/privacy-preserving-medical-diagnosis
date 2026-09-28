@@ -215,6 +215,43 @@ def resolve_checkpoint_calibration(checkpoint_cfg: dict[str, Any]) -> Checkpoint
     )
 
 
+def quality_props(bgr: np.ndarray, meta: DecodedMeta, gate_result: XrayGateResult | None) -> dict[str, Any]:
+    """`quality` -- merges the real pixel-level checks (`quality_checks`) with
+    the X-ray gate's own verdict (`xray_gate_props`). Computed once, eagerly,
+    right after upload/decode (before the user clicks "Analyze") so the
+    Image Check card can show a real "Chest X-ray detected" answer during
+    the `quality` phase, not just once analysis starts."""
+    return {**quality_checks(bgr, meta), "xray_gate": xray_gate_props(gate_result)}
+
+
+def build_props(
+    *,
+    phase: str,
+    study: dict[str, Any] | None = None,
+    quality: dict[str, Any] | None = None,
+    progress: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """The single JSON-safe dict builder feeding the component (Phase 1C).
+    Every field defaults to `None` ("Not available"/absent in the UI) rather
+    than a fabricated placeholder -- callers pass only what the current
+    `phase` actually has. Raw image/heatmap bytes are NOT included here (they
+    go through the component call's own separate `display_image`/`heatmap`
+    bytes kwargs, per the Streamlit 1.62 binary-arg behavior noted in the
+    plan) -- this keeps `build_props`'s own output trivially JSON-serializable,
+    checked directly by `test_app_presentation.py`."""
+    return {
+        "protocol_version": PROTOCOL_VERSION,
+        "phase": phase,
+        "study": study,
+        "quality": quality,
+        "progress": progress,
+        "result": result,
+        "error": error,
+    }
+
+
 def result_props(result: InferenceResult, calibration: CheckpointCalibration) -> dict[str, Any]:
     """`result` -- the bulk of the props contract table
     (docs/pneumoscan_redesign_plan.md Phase 1C). Deferral/certainty/OOD

@@ -188,13 +188,72 @@ JS (90KB gzipped) — well within limits, no fallback needed. Committed as
 `77225fb`. The temporary `?phase0_spike=1` block in `streamlit_app.py` and
 the throwaway `App.tsx` must be removed once Phase 1's real UI replaces them.
 
-## Phase 1: backend changes, then New Screening screen end-to-end — 1A COMPLETE (2026-09-27)
+## Phase 1: backend changes, then New Screening screen end-to-end — COMPLETE (2026-09-27)
 
-**Committed as `0a977e0`** (local, not yet pushed). All of 1A below is done
-and tested (46 tests, real end-to-end runs against the actual secagg
-checkpoint/gate/image this session, not just mocks). 1B/1C/1D/1E are NOT
-started — `app/streamlit_app.py` has not been touched yet in Phase 1 (still
-has the Phase 0 `?phase0_spike` block only).
+**1A committed as `0a977e0`** (local, not yet pushed at the time of writing).
+**1B/1C/1D/1E built and verified live in a same-session follow-up** (not yet
+committed): `app/presentation.py` gained `quality_props`/`build_props` (the
+top-level props builder), `app/streamlit_app.py` was fully rewritten (~300
+lines) as the real phase-driven state machine + single-worker
+`ThreadPoolExecutor` polling loop described in 1B, and the entire React
+frontend for the New Screening screen (both clinician and patient modes,
+including the full viewer -- wheel-zoom, pan, compare-split, invert,
+fullscreen, motion) was built against the frozen `contract.ts`/`bridge.ts`
+contract. The Phase 0 `?phase0_spike` block and spike `App.tsx` are fully
+removed (grep-verified, zero remaining references). Full test suite: 256
+passing (207 pre-redesign + 46 from 1A + 3 new: `test_streamlit_app.py`'s
+`AppTest` smoke test, `test_frontend_bundle.py`).
+
+**Verified with a real manual smoke test** (Vite dev server + built `dist/`
+served through a real local Streamlit process, driven via
+`claude-in-chrome`, both dev-mode and production-mode): sample-X-ray upload
+-> real gate/quality checks -> real threaded analysis against the actual
+`fedavg_secagg` checkpoint (MC Dropout, OOD, Grad-CAM all real, not mocked)
+-> review screen with real confidence/certainty/image-check values and a
+real colorized Grad-CAM overlay, all end-to-end through the new UI.
+
+**Two real bugs found by the manual browser smoke test, not by
+`tsc`/`npm run build`/pytest (none of which can catch a live-rendering
+bug)** -- confirms why this step, not just a clean build, was necessary:
+1. `bridge.ts`'s `syncFrameHeightToViewport` read `window.top.innerHeight`
+   unconditionally; this throws a real `SecurityError` (crashing the whole
+   component with "Component Error") whenever the component iframe is
+   cross-origin from the Streamlit page -- exactly the local dev-mode setup
+   (`PNEUMOSCAN_COMPONENT_DEV_URL` pointing at the separate Vite dev
+   server). Fixed with a try/catch falling back to `screen.availHeight`
+   (always readable cross-origin); production (same-origin, the committed
+   `dist/`) is unaffected and was re-verified working after the fix.
+2. `XrayViewer.tsx`'s heatmap-colorizing `useEffect` depended only on
+   `[heatmapRaw, opacity, highlightArea]`, but the `<canvas>` it draws onto
+   is only mounted in the DOM while the "AI overlay"/"Compare" view is
+   active (never in "Original" view). Switching into overlay view for the
+   first time mounted a fresh, never-drawn canvas (stuck at the browser's
+   default 300x150 blank size) with nothing to re-trigger the draw, since
+   none of the effect's own dependencies changed on a view-mode switch --
+   the overlay was silently invisible. Fixed by adding
+   `showOverlayLayer`/`showCompare` to the dependency array. Verified via
+   direct in-page JS (`canvas.getImageData`) before and after: 0 non-zero
+   pixels at a default 300x150 canvas -> all 50,176 pixels real jet-colorized
+   data at a correct 224x224 canvas, then confirmed visually.
+
+Also found and dismissed as a pure test-environment artifact (not a real
+app bug -- confirmed by loading the same built bundle standalone at its own
+origin, which rendered correctly): the automation browser's OS/Chrome-level
+forced-dark-content handling initially inverted the page's light theme
+inside the iframe specifically; added `color-scheme: light` to `tokens.css`
+as a standard, harmless opt-out regardless.
+
+**Not yet done / follow-ups for a future session:**
+- Not committed or pushed yet.
+- No CI frontend job (`.github/workflows/tests.yml` + a `setup-node`/`tsc`/
+  `npm run build`/dist-diff job) -- Risk #2's mitigation, still manual only.
+- No further manual smoke test beyond the one flow above (DICOM/.dicom
+  upload, a non-X-ray rejection, a sub-256px image, a 30MB client-side
+  reject, mobile width, `prefers-reduced-motion` emulation) -- the plan's
+  own full manual-smoke-test checklist is only partially exercised.
+- Deliberately out of scope for Phase 1 (unchanged from the original plan):
+  the 3D anatomical explorer (Phase 2) and Previous Studies/How It
+  Works/About (Phase 3) -- nav shows only "New Screening" as active.
 
 **Real results from running D1/D2 for real against `fedavg_secagg`:**
 - D1 (`scripts/derive_app_decision_policy.py`): `decision_threshold=0.55`,
