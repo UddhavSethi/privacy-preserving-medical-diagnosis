@@ -6,7 +6,11 @@ document — this file is a status snapshot, not a replacement for it. Read `CLA
 and `docs/IMPLEMENTATION_PLAN.md` in full before acting; this is a pointer/summary layer
 on top of them.
 
-**Last updated:** 2026-08-29, end of Phase 1 / Stage 5. Phase 1 (Stages 3-5) is complete.
+**Last updated:** 2026-09-28, end of §16 below. This line itself had gone stale for
+weeks (still said 2026-08-29 through several sessions' worth of real work already
+recorded in the sections below it) — exactly the class of documentation-maintenance
+gap CLAUDE.md's own resolved decision 15 already named once. Update this line every
+time you add a section here; don't let it happen again.
 
 ---
 
@@ -2017,3 +2021,119 @@ result.
 - CLAUDE.md's pending decision 3 (whether/how far to scale fine-tuning into the
   paper) remains explicitly parked at the owner's own direction, untouched by
   any of this.
+
+## 16. PneumoScan frontend redesign (Phases 0–2 of 4), then switching the deployed model to real DP (2026-09-27 to 2026-09-28)
+
+Full design/implementation record: `docs/pneumoscan_redesign_plan.md`. CLAUDE.md's
+own resolved decision 16 has the governance-level summary. This section is the
+session-continuation version: what a fresh session needs to not re-derive any of
+this from scratch.
+
+**What changed, architecturally.** `app/streamlit_app.py`'s old plain-Streamlit-
+widgets UI was fully replaced by a React custom component
+(`app/pneumoscan_component/`) built from a Claude Design handoff
+(`design/pneumoscan/design_handoff_pneumoscan/`) — the first Node/npm/React/three.js
+toolchain this project has ever had. The built `dist/` bundle is committed to git
+(Streamlit Community Cloud can't run `npm` itself). `app/inference.py`'s core
+prediction logic, `src/*`, training, and evaluation are untouched — this is
+presentation-layer only, same boundary OPT-6 always had.
+
+**Phase 0 (toolchain spike) and Phase 1 (New Screening screen) — committed across
+`0a977e0`, `880fa9d`, `b6f1246`.** New backend: `app/presentation.py` (the "never
+fabricate" props layer), `app/analysis_job.py` (threaded job orchestration,
+single-worker `ThreadPoolExecutor` so Cloud's shared CPU never runs two inferences
+at once), `app/streamlit_app.py` rewritten (~300 lines) as a phase-driven state
+machine (`upload/quality/analyzing/review/rejected/error`) + polling loop. Full
+React frontend for New Screening: upload, real quality/gate check, real threaded
+analysis, clinician/patient result views, full image viewer (zoom/pan/compare/
+invert/fullscreen). **Two real bugs a manual browser smoke test caught that
+`tsc`/`npm run build`/pytest could not**: (1) the component iframe's height-sync
+code threw a real `SecurityError` in local dev mode specifically (cross-origin
+iframe, since the dev Vite server is a different origin than Streamlit) — fixed
+with a `screen.availHeight` fallback; (2) a real user-reported contrast bug —
+several text elements relied on CSS *inheritance* rather than an explicit `color`,
+and browsers' forced-dark-content heuristics mis-invert inherited color
+specifically — fixed by making `color` explicit on every affected class, plus a
+static `<meta name="color-scheme" content="light">` (the CSS-only version loads
+too late for the browser's own heuristic, which decides at initial parse).
+
+**Phase 2 (3D anatomical explorer) — committed `20d24dc`, then a same-day
+follow-up `5eb71fc` adding a real Grad-CAM heatmap cloud to the 3D model itself.**
+Reuses the design's own `lung-model.html` (three.js) almost byte-for-byte — only
+its import map was repointed from a live unpkg CDN to vendored local files
+(`app/pneumoscan_component/frontend/public/vendor/three/`, SHA-384 verified
+byte-identical to the hashes the design file itself already pinned). React wraps
+it with the full postMessage protocol, layers/view/info panels, X-ray/3D
+crossfade, zone chips, confidence ring. Owner then asked directly whether the 2D
+heatmap's opacity-controlled visualization could exist in 3D too — extended the
+existing single-point "AI focus" gaussian glow into a real 16-point cloud sampled
+from the actual raw heatmap, same jet color ramp as the 2D view, reusing the same
+Opacity/Highlight-area sliders (no new/duplicate UI). Required real shader/JS
+edits to `lung-model.html` itself this time (new `uHeatOn`/`uHeatPoints[16]`/
+`uHeatWeights[16]` uniforms, a `jetColor()` GLSL function, a marker pool reusing
+the exact rest-space coordinate formula the existing single-point `onFocus()`
+already used). Verified live: 3D hotspot locations cross-checked against the real
+2D heatmap for the same analysis (matched); opacity slider confirmed to actually
+drive 3D intensity (0 → fully gone).
+
+**A real gitignore bug found and fixed while finalizing the Phase 2 commit
+(`20d24dc`, amended before push).** The blanket Python `build/` rule in
+`.gitignore` was silently swallowing the vendored `three.module.js`/
+`three.core.js` because they sit under a path segment literally named `build/`
+(three.js's own release layout) — invisible locally (files were still on disk,
+just untracked), would have broken the 3D viewer on a fresh clone or the real
+deployment. Fixed with negation rules plus a new regression test
+(`tests/test_frontend_bundle.py::test_lung_model_vendored_three_js_exists_and_is_git_tracked`)
+that parses `lung-model.html`'s own import map and asserts every referenced file
+is both present on disk AND actually `git ls-files`-tracked — verified the test
+fails without the fix, not just that it passes with it. **Lesson for any future
+vendored-asset work in this repo: after `git add`, diff the commit stat against
+what you expect to see — a gitignore rule drops files with no error, and `git
+status` right after `git add` won't flag it either.**
+
+**Model-configuration switch, `e83bb34` (2026-09-28, owner-directed).** The
+redesign's "single fixed configuration, no selector" requirement came from the
+Claude Design mockup's own README, not a deliberate privacy/accuracy decision —
+it had been implemented against `fedavg_secagg` (Secure Aggregation only,
+explicitly no DP), meaning the project's actual DP thesis wasn't visible in the
+live public demo. Owner asked directly why, prompting the switch to
+`fedavg_dp_eps4` (`conf/app.yaml`'s `active_configuration`). Ran `scripts/
+derive_app_decision_policy.py` (D1) and `scripts/precompute_app_deferral_ood.py`
+(D2) for real against this checkpoint first — same methodology as every other
+calibrated checkpoint, without which deferral/OOD/certainty would have silently
+gone to permanent "Not available" for it specifically. **Real findings**: at the
+naive 0.5 threshold this checkpoint is measurably Normal-biased (sensitivity only
+44.7% on validation); the real validation-derived `decision_threshold=0.2`
+recovers sensitivity to 71.8% at a real specificity cost (87.6%→73.3%);
+`temperature=2.2534` is a large real softening (severely overconfident
+pre-calibration, consistent with `docs/calibration.md`'s existing DP-causes-worse-
+ECE finding). Real cost vs. the previous `fedavg_secagg` default: AUROC
+0.8194±0.0200→0.8085±0.0097, ECE 0.0287±0.0169→0.1023±0.0037. Verified live on
+the actual Cloud deployment: the identical sample X-ray that produced a confident
+"No pneumonia pattern detected, 90%" under `fedavg_secagg` produces "Inconclusive
+— near the decision boundary, 76%" under `fedavg_dp_eps4` — real, differently-
+calibrated behavior, not a rendering difference.
+
+**CLAUDE.md updated, `6ea9c3b`.** New resolved decision 16 covers both the
+redesign and the model switch at governance level, with the before/after metrics
+table. Flagged, not silently fixed: §4's Technology Stack table still doesn't
+list React/npm/three.js — a real gap, left for the owner to decide whether/how to
+formalize.
+
+**Current state as of 2026-09-28: everything above is committed and pushed to
+`origin/main` (HEAD `6ea9c3b`). 255 tests passing.** Live at
+`pneumonia-fl-demo.streamlit.app`, verified working end-to-end on the actual
+Cloud deployment (not just locally) after each of the changes above, including a
+real full analysis run against the real `fedavg_dp_eps4` checkpoint. Zero console
+errors observed throughout.
+
+**Not yet done / open:**
+- Phase 3 (Previous Studies / How It Works / About static pages) — not started;
+  those nav links were removed rather than left as dead buttons in the meantime.
+- No CI frontend job yet (`tsc`/`npm run build`/dist-diff on push) — still a
+  manual step before each commit.
+- The plan's own full manual-smoke-test checklist (DICOM/.dicom upload, a
+  non-X-ray rejection, a sub-256px image, a 30MB client-side reject, mobile
+  width, `prefers-reduced-motion` emulation) is only partially exercised.
+- §4's Technology Stack table doesn't yet list the new frontend stack (see
+  CLAUDE.md resolved decision 16's own note) — raised, not resolved.
