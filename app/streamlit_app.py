@@ -12,8 +12,12 @@ fixed model configuration, run a background analysis job on a single-worker
 thread pool (so Cloud's shared CPU never runs two inferences at once), and
 translate JS events into session-state transitions.
 
-Single fixed configuration (owner-approved decision 3): `fedavg_secagg`
-(FedAvg + Secure Aggregation, no DP). No model selector anywhere in this UI.
+Single fixed configuration, read from `conf/app.yaml`'s `active_configuration`
+(owner-approved decision 3: no model selector anywhere in this UI). Switched
+from `fedavg_secagg` to `fedavg_dp_eps4` on 2026-09-28 (owner-directed) so
+the live public demo actually shows the project's Differential Privacy
+protection, not just Secure Aggregation -- see conf/app.yaml's own comment
+on that switch for the real accuracy/calibration cost.
 
 Run from the repository root:
 
