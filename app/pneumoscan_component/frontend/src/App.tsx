@@ -204,6 +204,8 @@ function App({ args }: ComponentProps): JSX.Element {
             reducedMotion={reducedMotion}
             aiHighlightOn={aiHighlightOn}
             setAiHighlightOn={setAiHighlightOn}
+            opacity={opacity}
+            highlightArea={highlightArea}
             openSignal={open3DSignal}
           />
         )}
