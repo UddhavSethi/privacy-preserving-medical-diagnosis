@@ -603,6 +603,17 @@ re-enablement) — see resolved decisions 12–13 below and `docs/adr1_groupnorm
 for the full record. Scaling the fine-tuned architecture into the paper's own results
 remains an open, explicitly undecided scope question — see Pending decisions.**
 
+**Update, 2026-09-28: the public demo app (`app/streamlit_app.py`) was fully
+rewritten** as a React custom component ("PneumoScan" redesign, from a Claude Design
+handoff — first Node/npm/React toolchain this Python-only project has ever had; the
+built `dist/` bundle is committed since Streamlit Community Cloud can't run `npm`
+itself). Research code, `src/*`, and the training/evaluation pipeline are entirely
+unchanged — this only replaced the demo's presentation layer. See resolved decision
+16 below for the frontend redesign and its own, separate follow-on decision to make
+the app's single fixed model configuration the real Differential Privacy checkpoint
+(`fedavg_dp_eps4`) rather than the Secure-Aggregation-only one it launched with.
+Research/tests below are unaffected by any of this: 255 passing.
+
 | Item | Status |
 |---|---|
 | Source deck studied and analyzed | Done |
@@ -613,7 +624,8 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
 | Code | All of Phases 0–5 (Stages 0–23) complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live; the full ablation campaign (Stage 21) ran 27/27 real live federated runs (3 seeds each) and produced the complete ablation table with real numbers for every row — local/centralized baselines, FedAvg (natural+balanced), FedAvg+SecAgg, FedAvg+DP (full epsilon sweep {1,2,4,8}, cleanly monotonic), and a supplementary Dirichlet synthetic non-IID sweep. Row 6 (full combined system) demonstrated live 2026-09-26 (resolved decision 14) — a single exploratory run, not yet a multi-seed ablation-table entry. Stage 22 audited the test suite against every CLAUDE.md §11.3 requirement (all already covered except the integration smoke test, now added) and added optional CI. Stage 23 produced the full documentation/reproducibility package (`README.md`, `docs/threat_model.md`, `docs/results.md`, `docs/reproducibility.md`, `docs/figures/`), including finding and fixing a real MLflow data-contamination bug in the integration smoke test. See `docs/SESSION_STATE.md` for current detail and the full table; this table is a coarse summary. |
 | Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`. |
-| Tests | 207 passing |
+| Deployed app | Live at `pneumonia-fl-demo.streamlit.app`. Redesigned frontend (resolved decision 16), single fixed active configuration `fedavg_dp_eps4` (real Differential Privacy, ε=4/δ=1e-5) — see resolved decision 16 for the switch and its real accuracy/calibration cost. |
+| Tests | 255 passing |
 
 ### Resolved decisions
 
@@ -889,6 +901,80 @@ remains an open, explicitly undecided scope question — see Pending decisions.*
 
     **Option (c)** (leave as documented future work) is now moot — (a) and
     (b) are both resolved.
+
+16. **PneumoScan frontend redesign (Phases 0–2 of 4 complete, 2026-09-27 to
+    2026-09-28) and its own follow-on decision: the deployed app's single
+    fixed model is now the real Differential Privacy checkpoint, not
+    Secure-Aggregation-only.** Full design/implementation record:
+    `docs/pneumoscan_redesign_plan.md`. Summary here is deliberately just the
+    architectural and configuration facts this document governs.
+
+    **Frontend redesign.** Replaced `app/streamlit_app.py`'s plain-widgets UI
+    with a React custom component (`app/pneumoscan_component/`) built from a
+    Claude Design handoff — the first Node/npm/React/three.js toolchain this
+    Python-only project has ever had. The built `dist/` bundle is committed
+    to git (Streamlit Community Cloud's build environment is Python/pip
+    only and cannot run `npm` itself) — **this is a real addition to the
+    technology stack that §4's own table does not yet list**; flagging
+    that gap here rather than silently editing §4 in the same pass, since
+    that table is its own approved artifact. `app/inference.py`,
+    `src/*`, training, evaluation, and every privacy/security layer are
+    completely unchanged — this only replaced the demo's presentation
+    layer. Phase 0 (toolchain) and Phase 1 (the New Screening screen —
+    upload, quality/gate check, real threaded analysis, clinician/patient
+    result views, full image viewer) are complete and verified live,
+    including a real embedded 3D anatomical lung model (`lung-model.html`,
+    three.js, reused from the design almost byte-for-byte) with a real
+    multi-point Grad-CAM heatmap cloud rendered directly on the 3D mesh —
+    not just a 2D overlay. Phase 3 (Previous Studies / How It Works / About
+    static pages) is not started; those nav links were removed rather than
+    left as dead buttons.
+
+    **Model-configuration switch (2026-09-28, owner-directed, prompted by
+    the owner asking directly why the live demo wasn't using DP).** The
+    redesign's own "single fixed configuration, no selector" requirement
+    (from the Claude Design mockup itself, not a deliberate accuracy
+    decision) had been implemented against `fedavg_secagg` (FedAvg + Secure
+    Aggregation, explicitly **no** Differential Privacy) — meaning the
+    project's actual DP thesis was not visible in the live public demo.
+    Switched `conf/app.yaml`'s `active_configuration` to `fedavg_dp_eps4`
+    (FedAvg + DP, target ε=4, δ=1e-5 — DG-7's own canonical default). Doing
+    this correctly required real, not cosmetic, work: `scripts/
+    derive_app_decision_policy.py` (D1) and `scripts/
+    precompute_app_deferral_ood.py` (D2) were run for real against this
+    checkpoint first, the same methodology already used for every other
+    calibrated checkpoint — skipping this would have silently dropped
+    deferral/OOD/certainty to permanent "Not available" for this
+    checkpoint specifically.
+
+    **Real findings from that calibration run, not assumptions:** at the
+    naive 0.5 threshold this checkpoint is measurably biased toward
+    "Normal" (sensitivity only 44.7% on validation) — the real
+    validation-derived `decision_threshold=0.2` recovers sensitivity to
+    71.8% at a real specificity cost (87.6%→73.3%). `temperature=2.2534`
+    is a large real softening — this checkpoint is severely overconfident
+    pre-calibration, consistent with `docs/calibration.md`'s existing
+    finding that DP causes a real ~4x ECE increase over no-DP checkpoints.
+    Real accuracy/calibration cost of this switch relative to the
+    previous `fedavg_secagg` default (`docs/results.md`,
+    `docs/calibration.md`, 3 seeds, natural regime, pooled test set):
+
+    | Metric | fedavg_secagg (previous) | fedavg_dp_eps4 (current) |
+    |---|---|---|
+    | AUROC | 0.8194 ± 0.0200 | 0.8085 ± 0.0097 |
+    | F1 | — (not separately tabulated) | 0.5460 ± 0.0198 |
+    | ECE | 0.0287 ± 0.0169 | 0.1023 ± 0.0037 |
+    | Brier score | 0.1875 ± 0.0141 | 0.1744 ± 0.0043 |
+    | Membership-inference attack AUROC | — (not separately tabulated for SecAgg alone) | 0.4966 ± 0.0018 (≈ chance) |
+
+    Verified live on the actual Cloud deployment, not just locally: the
+    identical sample X-ray that produced a confident "No pneumonia
+    pattern detected, 90%" under `fedavg_secagg` produces a genuinely
+    different "Inconclusive — near the decision boundary, 76%" under
+    `fedavg_dp_eps4` — real, differently-calibrated model behavior, not a
+    rendering difference. Zero console errors. 255 tests passing
+    throughout (no Python test changes were needed; this is a config +
+    precomputed-artifact change, not a code change to `src/*`).
 
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
