@@ -40,7 +40,18 @@ ood_detector:
 # decision 3): the ONLY configuration the redesigned UI runs -- no model
 # selector anywhere in it. Read by app/streamlit_app.py in place of the
 # pre-redesign DEFAULT_CONFIG_KEY + Advanced-panel selectbox.
-active_configuration: fedavg_secagg
+# Switched fedavg_secagg -> fedavg_dp_eps4 (2026-09-28, owner-directed):
+# the original fedavg_secagg-only choice came from the Claude Design
+# handoff's own mockup constraint, not a deliberate privacy/accuracy
+# decision -- this project's actual thesis includes Differential Privacy,
+# so the live public demo should show the DP-protected model, not the
+# SecAgg-only one. Real cost of this switch vs. fedavg_secagg: AUROC
+# 0.8194 -> 0.8085 (~1 point), ECE 0.0287 -> 0.1023 (DP is measurably
+# worse-calibrated -- mitigated by this entry's own real temperature=2.2534
+# recalibration above), ~13x more wall-clock per federated round during
+# training (irrelevant to inference-time serving). See
+# docs/results.md/docs/calibration.md for the full comparison.
+active_configuration: fedavg_dp_eps4
 
 # Real trained configurations only (CLAUDE.md's own governance: never expose an
 # option the backend doesn't actually support) — every entry below has a real
@@ -82,6 +93,30 @@ configurations:
     checkpoint: outputs/checkpoints/ablation/dp_eps4.0_seed42.pt
     description: "Differential Privacy at this project's pyproject.toml default epsilon."
     privacy_preserving: true
+    # Decision policy (D1, scripts/derive_app_decision_policy.py, real
+    # validation-set run 2026-09-28, owner-directed switch to make this the
+    # deployed default). Real finding, not a tuning artifact: at the naive
+    # 0.5 threshold this checkpoint is measurably biased toward "Normal"
+    # (sensitivity only 44.7% on val), matching this project's own
+    # documented DP-bias pattern (see streamlit_app.py's historical note on
+    # dp_eps4_seed42's Hospital A behavior). decision_threshold=0.2 (best-F1
+    # on the same 17-point 0.10-0.90 sweep every other checkpoint uses)
+    # recovers sensitivity to 71.8% at a real specificity cost (87.6% ->
+    # 73.3%) -- see outputs/results/fedavg_dp_eps4_threshold_calibration_analysis.json
+    # for the full sweep. temperature=2.2534 is a large softening -- this
+    # checkpoint is severely overconfident pre-calibration, consistent with
+    # docs/calibration.md's own finding that DP causes a real ~4x ECE
+    # increase over no-DP checkpoints.
+    decision_threshold: 0.2
+    temperature: 2.2534
+    abstention_half_width: 0.05
+    # D2 (scripts/precompute_app_deferral_ood.py, real validation-set run
+    # 2026-09-28) -- same reasoning as fedavg_secagg's own entry: these
+    # small precomputed artifacts (not the 576MB feature cache) give the
+    # public Cloud deployment real deferral/OOD values instead of
+    # permanent "Not available".
+    deferral_threshold: 0.6728980541229248
+    ood_artifacts_dir: outputs/app_artifacts/fedavg_dp_eps4
   - key: fedavg_dp_eps8
     label: "FedAvg + DP (epsilon=8, weakest privacy in sweep)"
     checkpoint: outputs/checkpoints/ablation/dp_eps8.0_seed42.pt
