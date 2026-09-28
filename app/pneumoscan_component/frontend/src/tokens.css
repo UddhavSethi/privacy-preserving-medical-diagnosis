@@ -1,0 +1,118 @@
+/* PneumoScan design tokens — verbatim from
+   design/pneumoscan/design_handoff_pneumoscan/README.md's "Design tokens"
+   section and cross-checked against the HTML prototype's own inline
+   values. CSS custom properties so components reference `var(--x)` instead
+   of repeating hex codes. */
+/* latin + latin-ext only (covers the app's own English/accented-name copy,
+   e.g. "Häggström") -- the full 400/500/600.css files pull in cyrillic,
+   greek and vietnamese subsets nobody asked for, ~15x the font payload. */
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-sans/latin-ext-400.css";
+@import "@fontsource/ibm-plex-sans/latin-ext-500.css";
+@import "@fontsource/ibm-plex-sans/latin-ext-600.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-ext-400.css";
+@import "@fontsource/ibm-plex-mono/latin-ext-500.css";
+
+:root {
+  /* page + ink */
+  --ps-page: #f4f6f7;
+  --ps-surface: #ffffff;
+  --ps-border: #e3e7ea;
+  --ps-divider: #f0f2f3;
+  --ps-ink: #14191d;
+  --ps-ink-secondary: #5b656d;
+  --ps-ink-tertiary: #7a848b;
+  --ps-ink-quaternary: #4c565d;
+
+  /* teal */
+  --ps-teal: #0f7c83;
+  --ps-teal-hover: #0d6d73;
+  --ps-teal-deep: #0a5c61;
+  --ps-teal-tint: #e4f1f1;
+  --ps-teal-tint-2: #e9f3f3;
+  --ps-teal-tint-3: #f0f7f7;
+  --ps-teal-bright: #56c7cd;
+  --ps-teal-bright-2: #3cb1b8;
+
+  /* warning */
+  --ps-warn-ink: #5a4214;
+  --ps-warn-bg: #fbf4e6;
+  --ps-warn-border: #f0e2c6;
+  --ps-warn-ink-strong: #8a520a;
+  --ps-warn-bg-strong: #fbf0dc;
+
+  /* dark (viewer / 3D) */
+  --ps-dark-panel: #0e1215;
+  --ps-dark-viewport: #06080a;
+  --ps-dark-border: #222a30;
+  --ps-dark-border-2: #2a343b;
+  --ps-dark-track: #182026;
+  --ps-dark-text: #dfe6e9;
+  --ps-dark-text-muted: #9aa7ad;
+
+  /* amber (AI focus) */
+  --ps-amber: #e0a040;
+  --ps-amber-2: #f0b35a;
+  --ps-amber-3: #f6cf94;
+
+  /* radii */
+  --ps-radius-control: 7px;
+  --ps-radius-card: 12px;
+  --ps-radius-viewer: 16px;
+  --ps-radius-pill: 999px;
+
+  /* spacing */
+  --ps-space-1: 4px;
+  --ps-space-2: 6px;
+  --ps-space-3: 8px;
+  --ps-space-4: 10px;
+  --ps-space-5: 12px;
+  --ps-space-6: 14px;
+  --ps-space-7: 16px;
+  --ps-space-8: 18px;
+  --ps-space-9: 20px;
+  --ps-space-10: 24px;
+
+  --ps-font-sans: "IBM Plex Sans", Helvetica, Arial, sans-serif;
+  --ps-font-mono: "IBM Plex Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+html {
+  /* This UI is light-only by design (README's own token set has no dark
+     variant) -- without this, Chrome's "Automatically darken web content"
+     heuristic (on by default in some profiles/OSes when a page declares no
+     color-scheme) force-inverts our explicit light backgrounds/dark text,
+     found live in this session's own browser smoke test. */
+  color-scheme: light;
+}
+
+body {
+  background: var(--ps-page);
+  color: var(--ps-ink);
+  font-family: var(--ps-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+}
+
+input[type="range"] {
+  accent-color: var(--ps-teal-bright-2);
+}
