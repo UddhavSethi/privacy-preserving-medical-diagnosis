@@ -97,12 +97,36 @@ void main(){
   vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - w.xyz);
   gl_Position = projectionMatrix * viewMatrix * w;
 }`;
+const HEAT_MAX = 16;
 const lungFrag = `
 uniform float uTime, uOpacity, uSelPulse, uFocusOn, uFocusR, uFocusPulse, uScanOn, uScanY;
 uniform vec3 uBase, uHover, uSelect, uFocusC;
 uniform vec2 uRest;
+uniform float uHeatOn;
+uniform vec3 uHeatPoints[${HEAT_MAX}];
+uniform float uHeatWeights[${HEAT_MAX}];
 varying vec3 vN; varying vec3 vV; varying vec3 vW;
 float band(vec3 b, float y){ return b.z * smoothstep(b.x - 0.035, b.x + 0.035, y) * (1.0 - smoothstep(b.y - 0.035, b.y + 0.035, y)); }
+// Real per-pixel Grad-CAM cloud (docs/pneumoscan_redesign_plan.md's own "PneumoScan +
+// Grad-CAM-in-3D" follow-up, owner-directed 2026-09-28): several real high-intensity
+// points sampled client-side from the actual heatmap, each rendered as a soft gaussian
+// splat -- extends the single-point "AI focus" glow above to an approximate continuous
+// field, using the same distance-based falloff technique already proven by uFocusC/fz
+// below, just summed over many points instead of one. Colors follow the identical jet
+// ramp app/pneumoscan_component/frontend/src/viewer/heatmap.ts uses for the 2D overlay,
+// so the 3D field reads as the same heatmap, not a different visualization.
+vec3 jetColor(float t) {
+  t = clamp(t, 0.0, 1.0);
+  vec3 c0 = vec3(0.031, 0.059, 0.322);
+  vec3 c1 = vec3(0.078, 0.471, 0.784);
+  vec3 c2 = vec3(0.471, 0.824, 0.510);
+  vec3 c3 = vec3(0.961, 0.784, 0.157);
+  vec3 c4 = vec3(0.863, 0.157, 0.118);
+  if (t < 0.25) return mix(c0, c1, t / 0.25);
+  if (t < 0.5) return mix(c1, c2, (t - 0.25) / 0.25);
+  if (t < 0.75) return mix(c2, c3, (t - 0.5) / 0.25);
+  return mix(c3, c4, (t - 0.75) / 0.25);
+}
 void main(){
   float y = (vW.y - uRest.x) / uRest.y;
   float ndv = abs(dot(normalize(vN), normalize(vV)));
@@ -125,6 +149,14 @@ void main(){
   a += fz * 0.55 * pulse;
   float ring = uFocusOn * exp(-pow((d - uFocusR * 1.8) / 0.03, 2.0)) * (0.55 + 0.45 * sin(uTime * 2.4));
   col += vec3(1.0, 0.72, 0.35) * ring * 0.9; a += ring * 0.28;
+  float heat = 0.0;
+  for (int i = 0; i < ${HEAT_MAX}; i++) {
+    float hd = distance(vW, uHeatPoints[i]);
+    heat += uHeatWeights[i] * exp(-hd * hd / (2.0 * 0.16 * 0.16));
+  }
+  heat = clamp(heat, 0.0, 1.0) * uHeatOn;
+  col = mix(col, jetColor(heat), heat * 0.8);
+  a += heat * 0.55;
   float sc = uScanOn * exp(-pow((vW.y - uScanY) / 0.055, 2.0));
   col += vec3(0.45, 0.95, 1.0) * sc * 1.2; a += sc * 0.5;
   gl_FragColor = vec4(col, clamp(a, 0.0, 1.0) * uOpacity);
@@ -135,7 +167,9 @@ function lungMat() {
     uniforms: {
       uTime: { value: 0 }, uOpacity: { value: 1 }, uSelPulse: { value: 0 }, uFocusOn: { value: 0 }, uFocusR: { value: 0.28 }, uFocusPulse: { value: 0 },
       uScanOn: { value: 0 }, uScanY: { value: 0 }, uBase: { value: new THREE.Color(0x8fd0d6) }, uHover: { value: V(0, 0, 0) },
-      uSelect: { value: V(0, 0, 0) }, uFocusC: { value: V(0, 0, 0) }, uRest: { value: new THREE.Vector2(0, 1) }
+      uSelect: { value: V(0, 0, 0) }, uFocusC: { value: V(0, 0, 0) }, uRest: { value: new THREE.Vector2(0, 1) },
+      uHeatOn: { value: 0 }, uHeatPoints: { value: Array.from({ length: HEAT_MAX }, () => V(0, 0, 0)) },
+      uHeatWeights: { value: new Float32Array(HEAT_MAX) }
     }
   });
 }
@@ -314,6 +348,14 @@ const fpGeo = new THREE.BufferGeometry(); fpGeo.setAttribute('position', new THR
 const fParts = new THREE.Points(fpGeo, new THREE.PointsMaterial({ color: 0xffb870, size: 0.04, map: TEX, transparent: true, opacity: 0, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
 fParts.renderOrder = 22; focusG.add(fParts);
 
+// ---------- Grad-CAM heat cloud (real multi-point data, see lungFrag's own comment) ----------
+// Lightweight transform-only markers (no visible geometry of their own) -- same pattern as
+// focusG itself: parented under `breath` so they inherit the identical breathing/scale
+// transform chain, repositioned each frame from real sampled heatmap points, then read back
+// via getWorldPosition() exactly like focusG/fw below.
+const heatG = new THREE.Group(); breath.add(heatG);
+const heatMarkers = Array.from({ length: HEAT_MAX }, () => { const m = new THREE.Object3D(); heatG.add(m); return m; });
+
 // ---------- Scan ----------
 const scanG = new THREE.Group(); root.add(scanG);
 const scanPlane = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 3.4), new THREE.MeshBasicMaterial({ map: TEX, color: 0x56c7cd, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
@@ -327,7 +369,7 @@ scanG.add(scanParts);
 
 // ---------- State ----------
 let S = { focus: null, showFocus: true, select: null, mode: 'clinician', layers: { lungs: true, lobes: true, bronchi: true, trachea: true, heart: true, ribs: false, spine: false }, breathing: !RM, autoRotate: !RM, scan: { active: false } };
-const F = { lungs: 1, lobes: 1, bronchi: 1, trachea: 1, heart: 1, ribs: 0, spine: 0, focus: 0 };
+const F = { lungs: 1, lobes: 1, bronchi: 1, trachea: 1, heart: 1, ribs: 0, spine: 0, focus: 0, heat: 0 };
 let selT0 = -1e9, focusT0 = -1e9, lastInteract = 0, hover = null, motion = S.breathing ? 1 : 0, scanA = 0;
 const focusRest = V(0, 0, 0);
 const STRUCT_T = { trachea: [V(0, 1.2, 0), 0.62], main: [V(0, 0.45, 0), 0.62], tree: [V(0, 0.2, 0), 0.72], heart: [V(0.18, -0.5, 0.2), 0.7], ribs: [T0, 1], spine: [T0, 1] };
@@ -446,6 +488,13 @@ addEventListener('resize', resize); resize();
 // ---------- Frame ----------
 const mR = document.getElementById('markR'), mL = document.getElementById('markL'), fl = document.getElementById('focusLbl'), gz = document.getElementById('gz'), vname = document.getElementById('vname');
 const tmp = new THREE.Vector3(), fw = new THREE.Vector3(), sw = new THREE.Vector3();
+// Shared per-frame scratch for the heat cloud -- computed once, then copied into both
+// lung materials' own uHeatPoints/uHeatWeights uniform arrays (each ShaderMaterial has
+// its own uniforms object; the underlying data is identical for both sides since a
+// point's real-world position already self-limits its visible falloff to whichever lung
+// it's actually near).
+const heatWorld = Array.from({ length: HEAT_MAX }, () => new THREE.Vector3());
+const heatWeights = new Float32Array(HEAT_MAX);
 const AX = [{ v: V(1, 0, 0), p: 'L', n: 'R', c: '#56c7cd' }, { v: V(0, 1, 0), p: 'S', n: 'I', c: '#dfe6e9' }, { v: V(0, 0, 1), p: 'A', n: 'P', c: '#e0a040' }];
 let lastName = '', lastQ = '', loadingGone = false, last = 0;
 const t0 = performance.now();
@@ -453,7 +502,12 @@ function project(p, el) { tmp.copy(p).project(camera); el.style.left = (tmp.x * 
 function frame() {
   const now = performance.now(); last = now;
   const t = (now - t0) / 1000;
-  for (const k in F) { const tg = k === 'focus' ? (S.focus && S.showFocus ? 1 : 0) : (S.layers[k] ? 1 : 0); F[k] += (tg - F[k]) * (RM ? 1 : 0.1); }
+  for (const k in F) {
+    const tg = k === 'focus' ? (S.focus && S.showFocus ? 1 : 0)
+      : k === 'heat' ? (S.heatPoints && S.heatPoints.length && S.showFocus ? 1 : 0)
+      : (S.layers[k] ? 1 : 0);
+    F[k] += (tg - F[k]) * (RM ? 1 : 0.1);
+  }
   motion += ((S.breathing ? 1 : 0) - motion) * 0.05;
   const b = Math.sin(t * Math.PI * 2 / 5);
   breath.scale.set(1 + 0.03 * b * motion, 1 + 0.02 * b * motion, 1 + 0.032 * b * motion);
@@ -484,6 +538,21 @@ function frame() {
   fRings.forEach((r, k) => { const ph = ((t * 0.45 + k * 0.5) % 1); r.scale.setScalar(0.22 + ph * 0.6); r.material.opacity = fa * (1 - ph) * 0.75; });
   fParts.rotation.y = t * 0.35; fParts.rotation.x = Math.sin(t * 0.3) * 0.3; fParts.material.opacity = fa * 0.75;
 
+  // heat (real multi-point Grad-CAM cloud -- see lungFrag's own comment)
+  const heatOn = F.heat;
+  const heatPts = S.heatPoints || [];
+  for (let i = 0; i < HEAT_MAX; i++) {
+    const p = heatPts[i];
+    if (!p) { heatWeights[i] = 0; continue; }
+    const b = bounds[p.side];
+    const x = Math.min(b.max.x - 0.22, Math.max(b.min.x + 0.22, (p.u - 0.5) * 2.9));
+    const t2 = Math.min(1, Math.max(0, (p.v - 0.12) / 0.68));
+    const y = Math.min(b.max.y - 0.08, Math.max(b.min.y + 0.08, b.max.y - t2 * (b.max.y - b.min.y)));
+    heatMarkers[i].position.set(x, y, 0.06);
+    heatMarkers[i].getWorldPosition(heatWorld[i]);
+    heatWeights[i] = p.w;
+  }
+
   // lungs
   const selPulse = Math.exp(-(now - selT0) / 1000 * 2.5);
   for (const side of ['right', 'left']) {
@@ -497,6 +566,8 @@ function frame() {
     U.uSelPulse.value = selPulse;
     U.uFocusOn.value = S.focus && S.focus.side === side ? fa : 0; U.uFocusC.value.copy(fw); U.uFocusPulse.value = fpulse * 0.8;
     U.uScanOn.value = scanA; U.uScanY.value = sw.y;
+    U.uHeatOn.value = heatOn;
+    for (let i = 0; i < HEAT_MAX; i++) { U.uHeatPoints.value[i].copy(heatWorld[i]); U.uHeatWeights.value[i] = heatWeights[i]; }
   }
   fissureMat.opacity = 0.5 * F.lobes * Math.max(F.lungs, 0.35); fissures.forEach(l => { l.visible = F.lobes > 0.01; });
   const hid = hover && hover.id, sid = S.select && S.select.kind === 'structure' ? S.select.id : null;

@@ -497,6 +497,53 @@ interaction sequence.
 The heaviest part (shaders) is reused as-is from `lung-model.html`; the React
 work here was panels and message-passing only, confirmed by the above.
 
+### Phase 2 follow-up: real Grad-CAM heatmap cloud in 3D — COMPLETE (2026-09-28)
+
+Owner-directed same-day follow-up ("can grad cam be shown in 3d model
+version as well... in the same way its shown in normal 2d way by changing
+opacity"). Chose "multi-point glow field" (owner-selected over per-zone
+bands or full texture projection) after inspecting the shader: the
+existing `uFocusC`/`uFocusOn`/`uFocusR` uniforms already render a single
+gaussian glow around one world-space point -- this is the *same* real
+technique repeated many times, not a new rendering approach.
+
+Real edits to `lung-model.html` itself this time (previously only its
+import map changed) -- the only file that needed them, since the point
+math and glow rendering are inherent to the shader, not the React wrapper:
+- `lungFrag`: new `uHeatOn`/`uHeatPoints[16]`/`uHeatWeights[16]` uniforms,
+  a `jetColor()` GLSL function matching `viewer/heatmap.ts`'s own ramp
+  exactly (same 5 color stops, so the 3D field reads as the same heatmap,
+  not a different palette), and a 16-point gaussian-sum loop blended into
+  the existing fragment color/alpha right after the single-point focus glow.
+- JS: a `heatG` marker pool (16 empty `Object3D`, same parent/pattern as
+  the existing `focusG`), a `heat` entry in the `F` easing object (eased
+  toward 1 whenever real points exist and "AI highlight" is on), and a
+  per-frame block computing each marker's world position from real
+  `(side, u, v)` data using the *exact* same rest-space formula
+  `onFocus()` already uses for the single point (verified by reading that
+  function's own source, not re-derived).
+- `app/pneumoscan_component/frontend/src/explorer/heatPoints.ts` (new):
+  downsamples the real raw 224×224 heatmap into a 16×16 grid, max-pools
+  each cell, thresholds by the *same* `highlightArea` value the 2D slider
+  already owns, and returns the top 16 weighted points -- opacity-scaled
+  by the *same* `opacity` value the 2D slider already owns. No new UI: the
+  existing Opacity/Highlight-area sliders (`App.tsx`, previously only
+  wired to the 2D viewer) are now also threaded into `Explorer3D`, so
+  there is exactly one set of controls for both views, not a duplicate.
+
+**Verified live**, not just built: `tsc --noEmit`/`npm run build` clean,
+zero console/shader-compile errors in a real browser. Cross-checked the
+3D result against the 2D heatmap for the same real analysis (sample X-ray,
+`fedavg_secagg`) -- both show the same two hotspots (right-middle,
+left-middle zones), confirming the coordinate mapping is correct, not just
+plausible-looking. Confirmed the Opacity slider actually drives the 3D
+cloud's intensity: set to 0, the cloud fully disappears; restored, it
+reappears matching the 2D view. This works for *any* result (not gated to
+Pneumonia-only like the single-point `focus`/`compute_focus`), since it
+samples the real heatmap directly rather than the backend's single-peak
+summary -- confirmed live on this session's own Normal-label test case,
+which still showed a real (if lower-confidence) attention pattern in 3D.
+
 ## Phase 3: Previous Studies, How It Works, About (static, frontend only) — NOT STARTED
 
 - **Previous Studies:** empty state only, no fake records.

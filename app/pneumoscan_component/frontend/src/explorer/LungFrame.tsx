@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { CameraView, LungLayers, Selection } from "./types";
+import type { HeatPoint } from "./heatPoints";
 import type { Focus } from "../contract";
 
 export interface LungFrameState {
@@ -11,6 +12,10 @@ export interface LungFrameState {
   breathing: boolean;
   autoRotate: boolean;
   scan: { active: boolean; progress?: number };
+  /** Real multi-point Grad-CAM cloud (owner-directed follow-up, 2026-09-28)
+   * -- see `heatPoints.ts` and `lung-model.html`'s own `HEAT_MAX`/`uHeat*`
+   * additions. Empty/omitted renders nothing, never a fabricated pattern. */
+  heatPoints: HeatPoint[];
 }
 
 export interface LungFrameHandle {

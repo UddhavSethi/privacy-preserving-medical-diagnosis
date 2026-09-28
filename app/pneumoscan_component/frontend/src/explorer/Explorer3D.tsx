@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Phase, ProgressProps, ResultProps, StudyProps } from "../contract";
 import { LungFrame, type LungFrameHandle, type LungFrameState } from "./LungFrame";
 import { LayersPanel } from "./LayersPanel";
@@ -7,6 +7,7 @@ import { InfoPanel } from "./InfoPanel";
 import { ZoneChips } from "./ZoneChips";
 import { XraySection } from "./XraySection";
 import { ConfidenceRing } from "./ConfidenceRing";
+import { sampleHeatPoints } from "./heatPoints";
 import { DEFAULT_LAYERS, type CameraView, type Selection } from "./types";
 
 export type ExplorerView = "3d" | "xray";
@@ -22,6 +23,11 @@ interface Props {
   reducedMotion: boolean;
   aiHighlightOn: boolean;
   setAiHighlightOn: (v: boolean) => void;
+  /** Same Opacity/Highlight-area state the 2D viewer's own sliders already
+   * own (App.tsx) -- reused as-is so the 3D heat cloud represents the
+   * identical real data the same way, not a separate/duplicate control. */
+  opacity: number;
+  highlightArea: number;
   /** Bumped by the result card's "Open 3D" button to force the 3D view and scroll here. */
   openSignal: number;
 }
@@ -40,6 +46,8 @@ export function Explorer3D({
   reducedMotion,
   aiHighlightOn,
   setAiHighlightOn,
+  opacity,
+  highlightArea,
   openSignal,
 }: Props) {
   const sectionRef = useRef<HTMLDivElement>(null);
@@ -87,9 +95,20 @@ export function Explorer3D({
 
   const focus = aiHighlightOn ? result?.focus ?? null : null;
 
+  // Real multi-point cloud from the same raw heatmap bytes the 2D viewer
+  // colorizes -- recomputed only when the underlying data/controls actually
+  // change (heatmapRaw is itself already content-stabilized upstream by
+  // App.tsx's useStableBytes, so this doesn't re-run on every ~0.3s poll
+  // tick for an unchanged heatmap).
+  const heatPoints = useMemo(
+    () => (aiHighlightOn ? sampleHeatPoints(heatmapRaw, opacity, highlightArea) : []),
+    [aiHighlightOn, heatmapRaw, opacity, highlightArea]
+  );
+
   const lungState: LungFrameState = {
     focus,
     showFocus: aiHighlightOn,
+    heatPoints,
     select: selection,
     mode,
     layers,
