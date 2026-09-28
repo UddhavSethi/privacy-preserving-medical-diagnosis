@@ -4,6 +4,7 @@ import type { ViewMode } from "../../viewer/XrayViewer";
 interface Props {
   result: ResultProps;
   setViewMode: (m: ViewMode) => void;
+  onOpen3D: () => void;
 }
 
 function findingTitle(result: ResultProps): string {
@@ -12,7 +13,7 @@ function findingTitle(result: ResultProps): string {
   return "Inconclusive — near the decision boundary";
 }
 
-export function ResultClinician({ result, setViewMode }: Props) {
+export function ResultClinician({ result, setViewMode, onOpen3D }: Props) {
   const rows: Array<[string, string]> = [
     ["How sure the AI is", result.certainty ?? "Not available"],
     ["Image check", result.image_check ?? "Not available"],
@@ -78,7 +79,10 @@ export function ResultClinician({ result, setViewMode }: Props) {
         </div>
         <div className="psc-next-step">
           <span className="psc-next-n">3</span>
-          <span className="psc-next-text">Record your own clinical assessment separately</span>
+          <span className="psc-next-text">See the AI's focus on a 3D lung model</span>
+          <button type="button" className="psc-btn psc-btn--outline-teal" onClick={onOpen3D}>
+            Open 3D
+          </button>
         </div>
       </div>
     </section>

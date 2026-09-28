@@ -16,6 +16,7 @@ import { ResultPatient } from "./components/right/ResultPatient";
 import { WhereAILooked } from "./components/right/WhereAILooked";
 import { RejectedCard } from "./components/right/RejectedCard";
 import { XrayViewer, type ViewMode } from "./viewer/XrayViewer";
+import { Explorer3D } from "./explorer/Explorer3D";
 
 function usePrefersReducedMotion(): boolean {
   const [reduced, setReduced] = useState(false);
@@ -47,6 +48,7 @@ function App({ args }: ComponentProps): JSX.Element {
   const [comparePct, setComparePct] = useState(50);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [clientError, setClientError] = useState<string | null>(null);
+  const [open3DSignal, setOpen3DSignal] = useState(0);
 
   const displayImageUrl = useObjectUrl(rawArgs.display_image, "image/jpeg");
   const heatmapRaw = useStableBytes(rawArgs.heatmap);
@@ -102,7 +104,7 @@ function App({ args }: ComponentProps): JSX.Element {
     if (data.phase === "review" && data.result) {
       return mode === "clinician" ? (
         <>
-          <ResultClinician result={data.result} setViewMode={setViewMode} />
+          <ResultClinician result={data.result} setViewMode={setViewMode} onOpen3D={() => setOpen3DSignal((n) => n + 1)} />
           <WhereAILooked
             study={data.study}
             displayImageUrl={displayImageUrl}
@@ -189,6 +191,22 @@ function App({ args }: ComponentProps): JSX.Element {
 
           <aside className="psc-col-right">{rightPanel}</aside>
         </div>
+
+        {hasImage && (
+          <Explorer3D
+            mode={mode}
+            phase={data.phase}
+            study={data.study}
+            displayImageUrl={displayImageUrl}
+            heatmapRaw={heatmapRaw}
+            result={data.result}
+            progress={data.progress}
+            reducedMotion={reducedMotion}
+            aiHighlightOn={aiHighlightOn}
+            setAiHighlightOn={setAiHighlightOn}
+            openSignal={open3DSignal}
+          />
+        )}
       </main>
     </div>
   );

@@ -5,7 +5,11 @@ interface Props {
   setMode: (m: Mode) => void;
 }
 
-const NAV_ITEMS = ["New Screening", "Previous Studies", "How It Works", "About"];
+// Previous Studies / How It Works / About removed (owner-directed,
+// 2026-09-28): those nav items were dead, disabled buttons with nothing
+// behind them (Phase 3, never started) -- confusing rather than useful.
+// "New Screening" is this app's only screen for now.
+const NAV_ITEMS = ["New Screening"];
 
 export function Header({ mode, setMode }: Props) {
   return (
