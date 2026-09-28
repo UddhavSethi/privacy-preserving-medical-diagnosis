@@ -65,6 +65,18 @@ env/
 # `dist/` rule above would otherwise silently swallow it.
 app/pneumoscan_component/frontend/node_modules/
 !app/pneumoscan_component/frontend/dist/
+# Same trap, one directory deeper: the vendored three.js files that must be
+# committed (public/ is their source, dist/ is Vite's copy) sit inside a
+# path segment literally named `build/` (three.js's own release layout),
+# which the blanket Python `build/` rule above silently matches even
+# though `dist/` itself is negated -- git re-applies later patterns
+# against already-negated paths per path segment, it doesn't cascade.
+# Found live 2026-09-28: three.module.js/three.core.js were silently
+# missing from a real commit (only OrbitControls.js, which isn't under a
+# `build/` segment, made it through) -- would have broken the 3D viewer on
+# a fresh clone or deployment despite working locally off-disk.
+!app/pneumoscan_component/frontend/public/vendor/three/build/
+!app/pneumoscan_component/frontend/dist/vendor/three/build/
 
 # ---- Testing / tooling ----
 .pytest_cache/

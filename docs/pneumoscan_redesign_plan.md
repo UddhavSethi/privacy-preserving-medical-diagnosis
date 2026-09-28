@@ -435,28 +435,67 @@ polling, the `pneumoscan(...)` call. Delete `app/components.py` and
 `app/theme.py` once nothing references them (Phase 3 at the latest). Also
 remove the Phase 0 `?phase0_spike` block and `App.tsx` spike at this point.
 
-## Phase 2: 3D anatomical explorer (frontend only, zero server cost) — NOT STARTED
+## Phase 2: 3D anatomical explorer (frontend only, zero server cost) — COMPLETE (2026-09-28)
 
-1. Copy `lung-model.html` into `frontend/public/` (Vite copies verbatim to
-   `dist/`). Vendor `three@0.184.0` into `public/vendor/three/`, repoint the
-   import map to relative URLs (keep SRI hashes, re-keyed). This is the only
-   edit to the file itself.
-2. `explorer/LungFrame.tsx`: iframe at `src="./lung-model.html"`, message
-   listener checking `e.source === iframe.contentWindow` (tightening the
-   prototype's unchecked `'*'` target), sends `pneumoscan-lung`/`pneumoscan-view`
-   state (de-duplicated, matching the prototype's `sendLung`), handles
-   `ready`/`select`/`view`. `focus` comes from `result.focus`; `scan`
-   progress from the real `progress.fraction`. 8s no-`ready` timeout (no
-   WebGL) falls back to the X-ray view.
-3. React overlay panels: X-ray/3D crossfade, Layers panel (clinician only,
-   AI-focus layer shares state with the viewer's toggle), View/zoom/toggle
-   panel (auto-rotate/breathing default off under reduced motion), info
-   panel, confidence ring (clinician) / "What the AI noticed" (patient),
-   analyzing stage list, X-ray view with zone lines + focus box, zone chips.
-4. Enable "Open 3D" in the result footer.
+Owner-directed (2026-09-28), alongside removing the dead Previous
+Studies/How It Works/About nav links (Header.tsx's `NAV_ITEMS` now just
+`["New Screening"]` — those were disabled buttons with nothing behind them,
+Phase 3 never started, more confusing than useful).
+
+1. **Done.** `lung-model.html` copied into `frontend/public/`, with its
+   import map repointed from the live `unpkg.com/three@0.184.0` URLs to
+   local `./vendor/three/...` paths — the only edit to the file itself.
+   `three.module.js`/`three.core.js`/`OrbitControls.js` vendored from unpkg
+   into `public/vendor/three/`, SHA-384 verified byte-identical to the
+   integrity hashes already pinned in the original file (zero version
+   drift). Verified live in a browser, standalone (`/lung-model.html`
+   directly, bypassing React/Streamlit entirely): the 3D scene renders
+   correctly — lungs, bronchial tree, trachea, rib cage, orientation gizmo —
+   with zero console errors, before any React work started on top of it.
+2. **Done.** `explorer/LungFrame.tsx`: iframe wrapper, message listener
+   hardened with `e.source === iframe.contentWindow`, de-duplicated
+   `pneumoscan-lung`/`pneumoscan-view` state posting (verified against the
+   file's own `addEventListener('message', ...)` handler and `pick()`/
+   `view()` functions, not just the README prose), 8s no-`ready` timeout
+   falling back to the X-ray view.
+3. **Done.** `explorer/{Explorer3D,LayersPanel,ViewPanel,InfoPanel,
+   ZoneChips,XraySection,ConfidenceRing,types}.tsx` — all the overlay panels,
+   the X-ray/3D crossfade, real data wired in (never fabricated): `focus`
+   from `result.focus`, `scan.progress` from real `progress.fraction`,
+   confidence/certainty in the info panel and confidence ring from the real
+   result. AI-focus layer shares state with the New Screening viewer's own
+   "AI highlight" toggle, not a duplicate. X-ray view reuses
+   `viewer/heatmap.ts`'s real colorizer, not a reimplementation.
+4. **Done.** "Open 3D" enabled in `ResultClinician.tsx`'s footer (step 3's
+   placeholder text from Phase 1 replaced with a real button) — scrolls to
+   the explorer and forces the 3D view.
+
+Two real bugs found and fixed via code review before any browser testing:
+a crossfaded-out layer kept default pointer-events, silently blocking
+clicks on the visible layer underneath (fixed: `pointerEvents: "none"` on
+the hidden layer); the zone-chip selection path (`side: "both"`) wasn't
+handled by the info panel's title/description functions, which only knew
+`"left"`/`"right"` (fixed).
+
+**Verified live** (`tsc --noEmit` + `npm run build` clean, both frontend
+tests passing, then a real browser smoke test against a local Streamlit
+process serving the built `dist/`): section renders below the New
+Screening columns once an image is loaded; X-ray view shows real zone
+lines/R-L markers/caption; switching to "3D anatomy" renders the live
+model with working Layers panel, View panel (Front/Left/Right/Top
+reflecting the iframe's own reported camera direction), zoom, auto-rotate,
+breathing; clicking a structure sends a real `select` message and the info
+panel shows the real tooltip copy; running a real analysis and clicking
+"Open 3D" correctly scrolls in, switches to 3D, and shows the *real* result
+(90% confidence, "No pneumonia pattern detected", Certainty: High) in both
+the confidence ring and info panel; the "AI focus" layer is correctly
+disabled for this Normal-label result (no `result.focus` — matches the
+"never fabricate" rule, since `compute_focus` only ever returns a real
+value for a Pneumonia label). Zero console errors throughout the full
+interaction sequence.
 
 The heaviest part (shaders) is reused as-is from `lung-model.html`; the React
-work here is panels and message-passing only.
+work here was panels and message-passing only, confirmed by the above.
 
 ## Phase 3: Previous Studies, How It Works, About (static, frontend only) — NOT STARTED
 
