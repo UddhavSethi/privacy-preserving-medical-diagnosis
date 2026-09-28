@@ -66,6 +66,7 @@
   font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.01em;
+  color: var(--ps-ink);
 }
 .psc-brand-sub {
   font-size: 12px;
@@ -155,6 +156,7 @@
 .psc-user-name {
   font-size: 12px;
   font-weight: 500;
+  color: var(--ps-ink);
 }
 .psc-user-session {
   font-size: 11px;
@@ -201,6 +203,7 @@
   font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.015em;
+  color: var(--ps-ink);
 }
 .psc-page-sub {
   font-size: 14px;
@@ -352,6 +355,7 @@
   font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.01em;
+  color: var(--ps-ink);
 }
 .psc-card-body {
   margin: 0;
@@ -419,6 +423,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--ps-ink);
 }
 .psc-row-value--mono {
   font-family: var(--ps-font-mono);
@@ -470,6 +475,7 @@
 .psc-check-label {
   flex: 1;
   min-width: 0;
+  color: var(--ps-ink);
 }
 .psc-check-value {
   color: var(--ps-ink-secondary);
@@ -510,6 +516,7 @@
 .psc-intro-title {
   font-size: 14px;
   font-weight: 500;
+  color: var(--ps-ink);
 }
 .psc-intro-text {
   font-size: 13px;
@@ -1079,6 +1086,7 @@
 .psc-substep-label {
   font-size: 14px;
   font-weight: 500;
+  color: var(--ps-ink);
 }
 .psc-substep-label--pending {
   color: var(--ps-ink-tertiary);
@@ -1124,6 +1132,7 @@
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.2;
+  color: var(--ps-ink);
 }
 .psc-conf-row {
   display: flex;
@@ -1133,6 +1142,7 @@
 .psc-conf-value {
   font: 500 32px var(--ps-font-mono);
   letter-spacing: -0.03em;
+  color: var(--ps-ink);
 }
 .psc-conf-word {
   font-size: 14px;
@@ -1212,11 +1222,13 @@
   flex: 1;
   min-width: 0;
   line-height: 1.4;
+  color: var(--ps-ink);
 }
 
 .psc-focus-plain {
   font-size: 14px;
   font-weight: 500;
+  color: var(--ps-ink);
 }
 .psc-thumb-grid {
   display: grid;
@@ -1262,6 +1274,7 @@
   font-weight: 600;
   letter-spacing: -0.015em;
   line-height: 1.25;
+  color: var(--ps-ink);
 }
 .psc-patient-section {
   padding: 16px 20px;
@@ -1279,10 +1292,12 @@
 .psc-patient-row-label {
   font-size: 15px;
   font-weight: 500;
+  color: var(--ps-ink);
 }
 .psc-patient-row-value {
   font-size: 16px;
   font-weight: 600;
+  color: var(--ps-ink);
 }
 .psc-sure-segs {
   display: grid;

@@ -3,9 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- This UI is light-only by design. tokens.css also declares
+         `color-scheme: light` on <html>, but that rule lives in the
+         bundled stylesheet, which loads AFTER first paint -- too late for
+         Chrome's "Automatically darken web content" heuristic, which
+         decides at initial parse and (per a real user report, not just
+         this session's own sandboxed test browser) can force-invert an
+         iframe's light backgrounds/dark text to pale-on-pale even with the
+         CSS rule present. A <meta> tag is part of the static HTML payload
+         itself, available before any JS/CSS loads, closing that race. -->
+    <meta name="color-scheme" content="light" />
     <title>PneumoScan component</title>
-    <script type="module" crossorigin src="./assets/index-CNRWvatR.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DIHzFkWF.css">
+    <script type="module" crossorigin src="./assets/index-CTQnL09z.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-C85UIRgn.css">
   </head>
   <body>
     <div id="root"></div>
