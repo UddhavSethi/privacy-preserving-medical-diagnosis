@@ -144,10 +144,13 @@ def main() -> None:
     mc_result = compute_mc_dropout_uncertainty(model, pooled.val_features, num_passes=NUM_MC_PASSES)
     prob_pneumonia = mc_result.mean_probs[:, 1].numpy()
 
-    threshold_rows, recommended_threshold = _sweep_threshold(y_true, prob_pneumonia)
-
+    # Temperature first, then the threshold sweep on the CALIBRATED probabilities:
+    # app/inference.py applies decision_threshold to temperature-scaled
+    # probabilities, so the threshold must be chosen on that same scale.
     temperature = fit_temperature(mc_result.mean_probs, torch.tensor(y_true, dtype=torch.long))
     calibrated_probs = apply_temperature(mc_result.mean_probs, temperature)[:, 1].numpy()
+
+    threshold_rows, recommended_threshold = _sweep_threshold(y_true, calibrated_probs)
 
     abstention_rows, recommended_half_width = _sweep_abstention(y_true, calibrated_probs, recommended_threshold)
 

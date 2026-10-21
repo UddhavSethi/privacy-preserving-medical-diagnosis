@@ -107,7 +107,13 @@ configurations:
     # checkpoint is severely overconfident pre-calibration, consistent with
     # docs/calibration.md's own finding that DP causes a real ~4x ECE
     # increase over no-DP checkpoints.
-    decision_threshold: 0.2
+    # RE-DERIVED 2026-10-21: the 0.2 above was swept on RAW probabilities but
+    # app/inference.py applies the threshold to temperature-scaled ones, so
+    # live behavior was ~89% sens / ~47% spec on test, not the intended
+    # ~72/73. scripts/derive_app_decision_policy.py now sweeps AFTER
+    # temperature scaling; best-F1 on calibrated val probs is 0.35
+    # (val sens 72.0% / spec 73.2%).
+    decision_threshold: 0.35
     temperature: 2.2534
     abstention_half_width: 0.05
     # D2 (scripts/precompute_app_deferral_ood.py, real validation-set run
