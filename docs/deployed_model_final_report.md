@@ -104,3 +104,31 @@ Note the deployed seed-42 checkpoint (AUROC 0.787) is below the 3-seed mean; see
 Source data: `outputs/results/fedavg_dp_eps4_deployed_final_report.json`,
 `outputs/results/fedavg_dp_eps4_threshold_calibration_analysis.json`, `docs/results.md`,
 `docs/calibration.md`, `docs/privacy_attack.md`, `docs/gradcam_localization.md`.
+
+## 9. Sensitivity analysis: excluding the ambiguous RSNA subgroup (evaluation only, no retraining)
+
+RSNA's "No Lung Opacity / Not Normal" cases (abnormal, not pneumonia) are labeled Normal
+(DG-2). Re-scoring the same deployed predictions with that subgroup (1,761 of 4,838 test
+images) removed from evaluation only, threshold 0.35:
+
+| Metric | Full test set (n=4,838) | Excluding ambiguous subgroup (n=3,077) |
+|---|---|---|
+| AUROC | 0.787 (0.774–0.800) | **0.884** (0.872–0.896) |
+| AUPRC | 0.599 | 0.892 |
+| Sensitivity | 73.1% | 73.1% (unchanged) |
+| Specificity | 72.2% | **89.0%** |
+| Precision | 54.2% | 86.3% |
+| NPV | 85.6% | 77.6% |
+| F1 | 0.623 | 0.792 |
+| Accuracy | 72.5% | 81.2% |
+| False positives | 927 | 174 |
+
+False-positive rate by true subgroup at the deployed threshold: truly Normal RSNA 9.3%
+(n=1,340), Kermany normal 21.3% (n=235), ambiguous "Not Normal" **42.8%** (n=1,761).
+With the ambiguous subgroup excluded, abstention keeps 87.8% of cases at 84.6% accuracy /
+92.5% specificity; abstention + deferral keeps 78.8% at 84.5% accuracy / 95.2% specificity.
+
+Reading: the precision problem is largely label ambiguity, not a weak model. Sensitivity does
+not move, since pneumonia cases are untouched. This is a cleaner-cohort figure, not a
+deployment figure: real use will include patients with other findings, so report both.
+Source: `outputs/results/fedavg_dp_eps4_excl_ambiguous_report.json` (local, gitignored).
