@@ -808,6 +808,20 @@ Research/tests below are unaffected by any of this: 255 passing.
     reported) is judged the stronger result for the paper. Full detail in
     `docs/adr1_groupnorm_fallback.md` §12–§13.
 
+    **Follow-up (2026-10-23): the filtered retrain was run anyway, as a
+    supplementary 3-seed experiment, and the decision stands.** Head-only
+    FedAvg + DP (ε=4, 20 rounds, natural regime, seeds {42, 123, 2024})
+    retrained on `hospitals_natural_filtered.json` and scored on the same
+    original test set as the all-data model. On clear-label cases AUROC rose
+    from 0.9068±0.0074 to 0.9295±0.0064 (+0.023, so retraining was not fully
+    redundant with evaluation-only exclusion). On the full test set it fell
+    from 0.8085±0.0119 to 0.7799±0.0200, with specificity dropping 0.88→0.62,
+    because the filtered model never sees the ambiguous subgroup. DG-2, the
+    ablation table and the deployed app model are unchanged. Reported as a
+    supplementary result in `docs/results.md`, explicitly not comparable to
+    the ablation table. The result bounds how much of the label-ambiguity
+    limitation is trainable-away; most of it is not.
+
 14. **Ablation row 6 ("full system": FedAvg + SecAgg+ + DP + TLS/client-auth) —
     demonstrated for the first time (2026-09-26), exploratory single-run, not
     yet a campaign.** Closes the architectural-feasibility half of pending
