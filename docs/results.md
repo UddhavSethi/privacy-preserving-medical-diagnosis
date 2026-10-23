@@ -301,6 +301,41 @@ undertrained snapshot rather than this configuration's real ceiling. Whether
 to re-run at 20 rounds for a fairer comparison is an open follow-up
 question, not yet decided.
 
+## Supplementary: retraining on filtered data (2026-10-23)
+
+**Not an ablation-table row and not comparable to it.** Tests whether removing the
+ambiguous RSNA "No Lung Opacity / Not Normal" patients from *training* (every split)
+changes the picture that evaluation-only exclusion already gave (`CLAUDE.md` resolved
+decision 13). Head-only FedAvg + DP, target ε=4 / δ=1e-5, 20 rounds, natural regime,
+seeds {42, 123, 2024}, partition `data/partitions/hospitals_natural_filtered.json`.
+Both arms are scored on the **same original natural test set** (deterministic forward
+pass, no calibration, threshold 0.5), so the "all data" arm reproduces the ablation
+table's ε=4 row (AUROC 0.8085; the std here uses n−1). Reproduce with
+`scripts/evaluate_filtered_retrain.py` (results: `outputs/results/filtered_retrain_3seed.json`).
+
+| Scored on | Metric | Trained on all data | Retrained on filtered data |
+|---|---|---|---|
+| Full test set (n=4838) | AUROC | 0.8085 ± 0.0119 | 0.7799 ± 0.0200 |
+| | AUPRC | 0.6271 ± 0.0278 | 0.5443 ± 0.0247 |
+| | Sensitivity | 0.4763 ± 0.0178 | 0.8438 ± 0.0124 |
+| | Specificity | 0.8793 ± 0.0073 | 0.6164 ± 0.0182 |
+| | Balanced accuracy | 0.6778 ± 0.0125 | 0.7301 ± 0.0152 |
+| Clear-label subset (n=3077, ambiguous subgroup excluded from scoring) | AUROC | 0.9068 ± 0.0074 | 0.9295 ± 0.0064 |
+| | AUPRC | 0.9110 ± 0.0076 | 0.9247 ± 0.0053 |
+| | Sensitivity | 0.4763 ± 0.0178 | 0.8438 ± 0.0124 |
+| | Specificity | 0.9801 ± 0.0041 | 0.8775 ± 0.0071 |
+| | Balanced accuracy | 0.7282 ± 0.0077 | 0.8606 ± 0.0097 |
+
+**Reading it.** Filtered training gains +0.023 AUROC on clear-label cases but loses
+0.028 on the full test set, because a model that never saw "abnormal but not
+pneumonia" images calls them pneumonia (specificity 0.88 → 0.62 overall). Its higher
+sensitivity at 0.5 reflects a shifted operating point as much as a better model. Most
+of the gap between the all-data model's full-test (0.809) and clear-label (0.907)
+AUROC is test-set label ambiguity that retraining does not recover. The filtered
+model is therefore not a candidate replacement for the project's label harmonization
+(DG-2) or for the deployed app model; it is reported to bound how much of the
+limitation is trainable-away.
+
 ## Statistical rigor
 
 Every row above is a mean ± std over 3 independent seeds, per `CLAUDE.md` §11.2 —
