@@ -57,19 +57,28 @@ of specificity — the right direction for a screening tool.
 Deferred cases are genuinely the hard ones: accuracy on deferred cases is 48.7% (chance)
 versus 75.2% on the rest.
 
-## 4. Research results, 3 seeds (mean ± std, pooled test set, threshold 0.5 unless noted)
+## 4. Same policy over 3 seeds (ε=4; T = 2.2534, threshold 0.35, MC-Dropout mean probabilities)
+
+The deployed operating point applied to the seed 42 / 123 / 2024 checkpoints (temperature fit on seed 42 only), pooled test set, mean ± std:
 
 | Metric | Value |
 |---|---|
-| AUROC | 0.8085 ± 0.0097 |
-| Accuracy | 0.7542 ± 0.0105 |
-| Sensitivity | 0.4763 ± 0.0178 |
-| Specificity | 0.8793 ± 0.0073 |
-| F1 | 0.5460 ± 0.0198 |
-| Balanced accuracy | 0.6778 ± 0.0125 |
-| ECE (uncalibrated) / Brier | 0.1023 ± 0.0037 / 0.1744 ± 0.0043 |
+| AUROC | 0.7996 ± 0.0121 |
+| AUPRC | 0.6176 ± 0.0247 |
+| Sensitivity | 0.7392 ± 0.0109 |
+| Specificity | 0.7317 ± 0.0185 |
+| Precision | 0.5540 ± 0.0163 |
+| NPV | 0.8617 ± 0.0048 |
+| F1 | 0.6332 ± 0.0106 |
+| Accuracy | 0.7340 ± 0.0118 |
+| Balanced accuracy | 0.7355 ± 0.0087 |
+| ECE (after calibration) | 0.0258 ± 0.0007 |
+| Brier (after calibration) | 0.1639 ± 0.0048 |
 
-Note the deployed seed-42 checkpoint (AUROC 0.787) is below the 3-seed mean; seed variance, not a bug.
+Note: the ablation table in section 5 reports AUROC 0.8085 ± 0.0097 for the same checkpoints because
+it scores a single deterministic forward pass; the 0.7996 here averages 20 MC-Dropout passes (what the
+app actually does). For reference, the same checkpoints at the naive 0.5 threshold, uncalibrated:
+sensitivity 0.4763 ± 0.0178, specificity 0.8793 ± 0.0073, F1 0.5460 ± 0.0198, ECE 0.1023 ± 0.0037.
 
 ## 5. Cost of each layer (AUROC, 3 seeds, natural regime)
 
