@@ -887,7 +887,7 @@ Research/tests below are unaffected by any of this: 255 passing.
     for a paper-credible comparison" — was already completed on 2026-09-21
     (checkpoints regenerated 2026-09-23), with real results already written
     into `docs/results.md`'s "ADR-1 GroupNorm fine-tuning fallback: 3-seed
-    comparison" section (commit `f0b3045`). This pending-decision entry's own
+    comparison" section (commit `dd41029`). This pending-decision entry's own
     text was simply never updated to say so, and stayed describing option (b)
     as "not started" for three days after it was finished — caught only when
     the owner asked to reopen this decision, expecting a fresh ~25-30

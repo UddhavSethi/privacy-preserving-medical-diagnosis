@@ -185,12 +185,12 @@ round-trip visibly correct, sticky header, single scroll region, no Streamlit
 chrome leaking through, no console errors. JS->Python direction re-uses
 identical code already directly verified working locally. Bundle size: 324KB
 JS (90KB gzipped) — well within limits, no fallback needed. Committed as
-`68eaa67`. The temporary `?phase0_spike=1` block in `streamlit_app.py` and
+`91eb91d`. The temporary `?phase0_spike=1` block in `streamlit_app.py` and
 the throwaway `App.tsx` must be removed once Phase 1's real UI replaces them.
 
 ## Phase 1: backend changes, then New Screening screen end-to-end — COMPLETE (2026-09-27)
 
-**1A committed as `b175460`** (local, not yet pushed at the time of writing).
+**1A committed as `116f4e9`** (local, not yet pushed at the time of writing).
 **1B/1C/1D/1E built and verified live in a same-session follow-up** (not yet
 committed): `app/presentation.py` gained `quality_props`/`build_props` (the
 top-level props builder), `app/streamlit_app.py` was fully rewritten (~300

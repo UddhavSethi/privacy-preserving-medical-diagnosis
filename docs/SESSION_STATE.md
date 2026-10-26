@@ -156,25 +156,25 @@ re-asserted by a dedicated test against the live files).
 
 | Stage | Status | Commit(s) |
 |---|---|---|
-| 0 — Repository foundation | **Done** | `fffae5d` |
-| 1 — Pinned Python 3.11 env | **Done** | `3d11802` |
-| 2 — Config, seeding, MLflow tracking | **Done**, 8/8 tests passing | `33dc9f6` |
-| 3 — Dataset acquisition & validation | **Done**, both datasets, zero data-integrity issues | `1144ae4` (Kermany), `2c0bdfa` (RSNA) |
-| 4 — Label harmonization & patient-level splitting | **Done** — DG-2 applied, both sources fully patient-grouped, 18 tests passing, splits frozen in `data/partitions/{kermany,rsna}_splits.json` | `3e22d25` |
-| 5 — Hospital partitioning | **Done.** DG-3 resolved (report both). 29/29 tests passing. | `4628f20` |
-| 6 — CLAHE preprocessing + cache | **Done.** 37/37 tests passing. Full cache built: 5,856 Kermany + 26,684 RSNA images (46GB on local disk, not committed — see §9). MLflow artifact logged (experiment `clahe_cache`). | `6c432b7` |
-| 7 — torchvision transforms/Dataset/DataLoader | **Done.** 48/48 tests passing. Smoke-tested end-to-end on real cached data from both sources, including multi-worker DataLoader. | `1341df2` |
-| 8 — DenseNet121 frozen backbone + head | **Done — ADR-1's premise fully validated, no GroupNorm fallback needed.** 57/57 tests passing (9 new). See note below the table. | `a2e386a` |
-| 9 — Frozen-backbone feature cache | **Done.** DG-5 resolved (K=5 augmented views). 62/62 tests passing (5 new). Full cache built and measured — see note below the table. | `d506cbf` |
-| 10 — Evaluation and metrics module | **Done.** 85/85 tests passing (23 new). No open decision gates. See note below the table. | `d2b5522` |
-| 11 — Local single-hospital baseline (ablation row 1) | **Done.** 94/94 tests passing (8 new + 1 partitioning regression test). Real results below — no architecture concerns triggered. | `180e45c` |
-| 12 — Centralized pooled baseline (ablation row 2) | **Done.** 97/97 tests passing (3 new). Centralized model matched/exceeded every local baseline — all [OK]. See note below the table. | `b7450cf` |
+| 0 — Repository foundation | **Done** | `28ab1c9` |
+| 1 — Pinned Python 3.11 env | **Done** | `f75b288` |
+| 2 — Config, seeding, MLflow tracking | **Done**, 8/8 tests passing | `f5330d9` |
+| 3 — Dataset acquisition & validation | **Done**, both datasets, zero data-integrity issues | `b793ae2` (Kermany), `6be9c27` (RSNA) |
+| 4 — Label harmonization & patient-level splitting | **Done** — DG-2 applied, both sources fully patient-grouped, 18 tests passing, splits frozen in `data/partitions/{kermany,rsna}_splits.json` | `7d11109` |
+| 5 — Hospital partitioning | **Done.** DG-3 resolved (report both). 29/29 tests passing. | `d7bb453` |
+| 6 — CLAHE preprocessing + cache | **Done.** 37/37 tests passing. Full cache built: 5,856 Kermany + 26,684 RSNA images (46GB on local disk, not committed — see §9). MLflow artifact logged (experiment `clahe_cache`). | `859e8ad` |
+| 7 — torchvision transforms/Dataset/DataLoader | **Done.** 48/48 tests passing. Smoke-tested end-to-end on real cached data from both sources, including multi-worker DataLoader. | `ec23e64` |
+| 8 — DenseNet121 frozen backbone + head | **Done — ADR-1's premise fully validated, no GroupNorm fallback needed.** 57/57 tests passing (9 new). See note below the table. | `34950b6` |
+| 9 — Frozen-backbone feature cache | **Done.** DG-5 resolved (K=5 augmented views). 62/62 tests passing (5 new). Full cache built and measured — see note below the table. | `6a5b563` |
+| 10 — Evaluation and metrics module | **Done.** 85/85 tests passing (23 new). No open decision gates. See note below the table. | `fc31c97` |
+| 11 — Local single-hospital baseline (ablation row 1) | **Done.** 94/94 tests passing (8 new + 1 partitioning regression test). Real results below — no architecture concerns triggered. | `3c5d966` |
+| 12 — Centralized pooled baseline (ablation row 2) | **Done.** 97/97 tests passing (3 new). Centralized model matched/exceeded every local baseline — all [OK]. See note below the table. | `22f435f` |
 | 13 — Flower FedAvg in simulation (ablation row 3) | **Done — real 20-round FedAvg run completed end-to-end.** 101/101 tests passing (4 new). No privacy layers yet (by design — DP/SecAgg/TLS come next). Several real Flower-tooling issues hit and fixed; see note below the table. | (pending commit this session) |
-| 14 — Differential Privacy with formal accounting (ablation row 5) | **Done — DG-7 resolved and applied.** Opacus DP-SGD wired into `client_app.py` as a config-switchable layer (`dp-enabled`, default `false`; Stage 13's no-DP path untouched). 111/111 tests passing (10 new). Two real live `flwr run` DP runs at epsilon=4 and epsilon=1, confirming the expected privacy-utility tradeoff. See note below the table. | b766acd |
-| 15 — Secure Aggregation with Flower SecAgg+ (ablation row 4) | **Done — real live `flwr run` with SecAgg+ actually masking updates.** SecAgg+ at flwr==1.35.0 only integrates via Flower's legacy Strategy/workflow API (not Stage 13/14's Message-API `strategy.start()`), confirmed against installed source + Flower's own reference example — a genuine API-surface finding, raised with and approved by the owner before implementation. Separate `client_app_secagg.py`/`server_app_secagg.py` app pair. 114/114 tests passing (3 new). See note below the table. | 89fc241 |
-| 16 — TLS + client authentication (ADR-4) | **Done — real TLS + Flower node-authentication validated end-to-end, deployment engine (not simulation), using Stage 13/14's canonical app unmodified (ADR-8 confirmed).** `scripts/generate_certs.sh`, `src/federated/security.py`, `conf/federated/tls.yaml`, `tests/{test_tls_auth,test_security}.py`. 119/119 tests passing (5 new), including a real subprocess-level negative test (unregistered SuperNode rejected) and positive test (registered SuperNode accepted). See note below the table. | 6bf0f96 |
-| 17 — Docker Compose multi-client deployment | **Done — real `docker compose` run, 4 separate containers over a real Docker network, all 3 hospitals training every round, clean teardown.** Scope (owner-approved 2026-08-30): FedAvg + TLS/auth only, CPU-only (DG-9). `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}`, `scripts/{run_deployment.sh,prepare_deployment_shards.py}`, `client_app.py`'s `_resolve_config()` addition. Three real bugs found and fixed via live runs, not inspection — see note below the table. Still 119/119 (no new unit tests — infra/deployment stage). | 0a324d0 |
-| 18 — Grad-CAM explainability | **Done — real, non-degenerate, class-discriminative heatmaps on real trained checkpoints and real chest X-rays.** A real ADR-1/Grad-CAM interaction the plan itself flagged as needing empirical verification turned out to be a real bug (crash, not silent wrong output) on the first live test run — see note below the table. `src/explain/gradcam.py`, `scripts/generate_explanations.py`. 125/125 tests passing (6 new). | 49694df |
+| 14 — Differential Privacy with formal accounting (ablation row 5) | **Done — DG-7 resolved and applied.** Opacus DP-SGD wired into `client_app.py` as a config-switchable layer (`dp-enabled`, default `false`; Stage 13's no-DP path untouched). 111/111 tests passing (10 new). Two real live `flwr run` DP runs at epsilon=4 and epsilon=1, confirming the expected privacy-utility tradeoff. See note below the table. | 81045cf |
+| 15 — Secure Aggregation with Flower SecAgg+ (ablation row 4) | **Done — real live `flwr run` with SecAgg+ actually masking updates.** SecAgg+ at flwr==1.35.0 only integrates via Flower's legacy Strategy/workflow API (not Stage 13/14's Message-API `strategy.start()`), confirmed against installed source + Flower's own reference example — a genuine API-surface finding, raised with and approved by the owner before implementation. Separate `client_app_secagg.py`/`server_app_secagg.py` app pair. 114/114 tests passing (3 new). See note below the table. | 779c72f |
+| 16 — TLS + client authentication (ADR-4) | **Done — real TLS + Flower node-authentication validated end-to-end, deployment engine (not simulation), using Stage 13/14's canonical app unmodified (ADR-8 confirmed).** `scripts/generate_certs.sh`, `src/federated/security.py`, `conf/federated/tls.yaml`, `tests/{test_tls_auth,test_security}.py`. 119/119 tests passing (5 new), including a real subprocess-level negative test (unregistered SuperNode rejected) and positive test (registered SuperNode accepted). See note below the table. | 03b6795 |
+| 17 — Docker Compose multi-client deployment | **Done — real `docker compose` run, 4 separate containers over a real Docker network, all 3 hospitals training every round, clean teardown.** Scope (owner-approved 2026-08-30): FedAvg + TLS/auth only, CPU-only (DG-9). `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}`, `scripts/{run_deployment.sh,prepare_deployment_shards.py}`, `client_app.py`'s `_resolve_config()` addition. Three real bugs found and fixed via live runs, not inspection — see note below the table. Still 119/119 (no new unit tests — infra/deployment stage). | 4437396 |
+| 18 — Grad-CAM explainability | **Done — real, non-degenerate, class-discriminative heatmaps on real trained checkpoints and real chest X-rays.** A real ADR-1/Grad-CAM interaction the plan itself flagged as needing empirical verification turned out to be a real bug (crash, not silent wrong output) on the first live test run — see note below the table. `src/explain/gradcam.py`, `scripts/generate_explanations.py`. 125/125 tests passing (6 new). | 1f1544e |
 | 19 — Monte Carlo Dropout and deferral | **Done — DG-10 resolved (fixed coverage target, defer worst 10%), verified on the real pooled test set: retained-case accuracy exceeds overall accuracy.** No implementation bugs this time (all 9 new tests passed on first run) — a clean stage after Grad-CAM's real bug. `src/uncertainty/{mc_dropout,deferral}.py`, `conf/experiment/uncertainty.yaml`. 134/134 tests passing (9 new). | (pending commit this session) |
 | 20 — Overhead instrumentation | **Done — real per-round communication and compute cost, DP's and SecAgg's overhead attributed separately from real live-run comparisons.** `src/evaluation/overhead.py`, small additive instrumentation in `client_app.py`/`client_app_secagg.py`. 140/140 tests passing (6 new). See note below the table. | (pending commit this session) |
 | 21 — Full ablation campaign | **Done — 27/27 real live runs succeeded, every row of the ablation table has real numbers, 3 seeds each.** Epsilon sweep shows a clean monotonic privacy-utility tradeoff; Dirichlet sweep shows the expected heterogeneity-hurts-FedAvg effect. Real bugs found and fixed along the way — see note below the table. 144/144 tests passing (3 new). | (pending commit this session) |
@@ -250,7 +250,7 @@ on the first attempt** (`src/models/densenet_head.py`, `src/models/freezing.py`,
 - 23 new tests (85 total), all passing.
 
 **Real bug found and fixed before Stage 11 could produce valid results (committed
-separately, `95cbec7`):** `natural_shard_rsna` (Stage 5) defaulted to `seed=1000`,
+separately, `478881f`):** `natural_shard_rsna` (Stage 5) defaulted to `seed=1000`,
 identical to `data_partition_seed` — the seed Stage 4's `grouped_stratified_split`
 already used on this exact patient population. Both sort-then-`random.Random(seed)`
 -shuffle, so the same seed reproduces the identical permutation; cutting it in half
@@ -1215,7 +1215,7 @@ raised, evaluated, and approved-in-concept by the owner on 2026-08-29 — **OPT-
 federated-update anomaly detection — that interpretation was evaluated and explicitly
 rejected as conflicting with SecAgg+) and **OPT-6** (a Streamlit demo interface,
 presentation-only). Both are documented in CLAUDE.md §16.1a and
-`docs/IMPLEMENTATION_PLAN.md` Phase 6 (OPT-5/OPT-6), committed in `078b4d8`. **Neither
+`docs/IMPLEMENTATION_PLAN.md` Phase 6 (OPT-5/OPT-6), committed in `582403a`. **Neither
 is part of the 24-stage critical path, and implementation of either still needs a
 separate explicit go-ahead** — do not start building either just because they're
 documented. Earliest they could start: OPT-5 after Stage 11 (needs a trained model);
@@ -1255,7 +1255,7 @@ Stage 21 campaign's actual data (not from memory or assumption):
    example of the exact silent-corruption failure mode CLAUDE.md §12's
    reproducibility discipline exists to catch.
 
-Both fixes committed together (`d4dc4fe`) with the regenerated,
+Both fixes committed together (`b16cbd5`) with the regenerated,
 now-correct `docs/figures/*.png`. Full suite re-verified after the fix:
 145/145 passing.
 
@@ -1372,8 +1372,8 @@ approval — the last one (adding `requests`) was resolved and committed in Stag
 
 ## 10. Git status
 
-**Branch:** `main`. Stage 23's doc fixes are committed as `d4dc4fe` (on top of
-the Stage 22 commit, itself on top of `9cf87af` Stage 21). Stage 23's remaining
+**Branch:** `main`. Stage 23's doc fixes are committed as `b16cbd5` (on top of
+the Stage 22 commit, itself on top of `9343d04` Stage 21). Stage 23's remaining
 content (`README.md`, `docs/threat_model.md`, `docs/results.md`,
 `docs/reproducibility.md`, this file's own update) is about to be committed as
 a separate commit — check `git log --oneline -5` on resume. **CLAUDE.md itself
@@ -1382,11 +1382,11 @@ CLAUDE.md's own governance rule (see §11); do not apply it without a separate
 explicit approval, even under the Stage 21-23 autonomy grant.
 
 ```
-d4dc4fe Stage 23: fix ablation-table row labeling and smoke-test MLflow contamination
-6f8f707 Stage 22: integration smoke test + optional CI workflow
-9cf87af Stage 21: Full ablation campaign — 27/27 real live runs, complete results table
-bffd599 Stage 20: Overhead instrumentation — DP and SecAgg overhead attributed separately
-88ae61d Stage 19: Monte Carlo Dropout and deferral (DG-10 resolved) — Phase 4 complete
+b16cbd5 Stage 23: fix ablation-table row labeling and smoke-test MLflow contamination
+8302679 Stage 22: integration smoke test + optional CI workflow
+9343d04 Stage 21: Full ablation campaign — 27/27 real live runs, complete results table
+f5c65e5 Stage 20: Overhead instrumentation — DP and SecAgg overhead attributed separately
+79a3aa5 Stage 19: Monte Carlo Dropout and deferral (DG-10 resolved) — Phase 4 complete
 ```
 
 **Standing authorization:** owner granted full autonomy for Phase 1 (commands,
@@ -1495,7 +1495,7 @@ is still pending — check `git log`/`git status` fresh rather than trusting
 older notes in this section about what's committed.
 
 **Update, later same session:** the CLAUDE.md proposal above WAS answered
-("go ahead") and applied (two small commits, `c117aa9` + `57eb43c` — status
+("go ahead") and applied (two small commits, `bb5f3a4` + `3a18f26` — status
 table only, no architecture change). The owner then explicitly requested a
 full Phase 6 prioritization review (all 6 OPT extensions evaluated for
 research value, effort, risk, overlap, essential/recommended/optional/
@@ -1684,8 +1684,8 @@ grant. OPT-6 (Streamlit demo) is explicitly NOT started — the owner said
 "we will discuss streamlit deployement after that," meaning a fresh
 check-in is needed before any OPT-6 work begins, not an assumption of
 continued autonomy. All five completed extensions are committed and
-pushed to `origin/main` (commits `ed947c8`, `75951e1`, `4f2df05`,
-`f6e4c78`, and OPT-5's own commit immediately following this note).
+pushed to `origin/main` (commits `10d57f1`, `c3de596`, `0ac5a1d`,
+`5138634`, and OPT-5's own commit immediately following this note).
 
 ## 13. OPT-6 — Streamlit demo interface
 
@@ -1924,7 +1924,7 @@ still explicitly parked, unaffected by this work).
    three checkpoints (metrics were unaffected, saved to JSON first) — fixed with an
    explicit `checkpoint_name` parameter, and row 2's checkpoints were re-run and
    regenerated (2026-09-23) to confirm the fix, matching the original numbers exactly.
-   Committed `f0b3045`, pushed to origin.
+   Committed `dd41029`, pushed to origin.
 2. **DP + ADR-1 fine-tuning VRAM smoke test** (CLAUDE.md's pending decision 4, raised
    2026-09-22): does DP-SGD fit in this machine's 4GB VRAM once fine-tuning raises the
    trainable parameter count from ~263K (head-only, already production-proven) to
@@ -1938,7 +1938,7 @@ still explicitly parked, unaffected by this work).
    `inplace=False` on denseblock4's ReLUs — a flag, not a parameter, so no existing
    checkpoint or non-DP run is affected (verified: full suite 207/208 passing, the one
    failure an unrelated subprocess-timeout flake in the canonical non-fine-tuned path,
-   confirmed by grep to never touch `fine_tune_last_block`). Committed `86e2678`,
+   confirmed by grep to never touch `fine_tune_last_block`). Committed `11d4d24`,
    pushed to origin.
 3. **The real single-seed DP+fine-tuning experiment** (what the smoke test unblocked):
    new `scripts/train_centralized_finetune_dp.py`, seed 42, centralized/pooled natural
@@ -1966,7 +1966,7 @@ still explicitly parked, unaffected by this work).
 
 **Current state as of 2026-09-25**: items 1 and 2 are committed and pushed. Item 3
 (`scripts/train_centralized_finetune_dp.py` and its `docs/results.md`/
-`docs/SESSION_STATE.md` writeup) is now committed (`3f08529`, not yet pushed).
+`docs/SESSION_STATE.md` writeup) is now committed (`98a8927`, not yet pushed).
 CLAUDE.md's pending decision 4 has been updated (owner-approved) to record item 3's
 result.
 
@@ -2039,7 +2039,7 @@ prediction logic, `src/*`, training, and evaluation are untouched — this is
 presentation-layer only, same boundary OPT-6 always had.
 
 **Phase 0 (toolchain spike) and Phase 1 (New Screening screen) — committed across
-`b175460`, `34378b2`, `22cecc7`.** New backend: `app/presentation.py` (the "never
+`116f4e9`, `3e4b882`, `f938aa8`.** New backend: `app/presentation.py` (the "never
 fabricate" props layer), `app/analysis_job.py` (threaded job orchestration,
 single-worker `ThreadPoolExecutor` so Cloud's shared CPU never runs two inferences
 at once), `app/streamlit_app.py` rewritten (~300 lines) as a phase-driven state
@@ -2057,8 +2057,8 @@ specifically — fixed by making `color` explicit on every affected class, plus 
 static `<meta name="color-scheme" content="light">` (the CSS-only version loads
 too late for the browser's own heuristic, which decides at initial parse).
 
-**Phase 2 (3D anatomical explorer) — committed `8a35d77`, then a same-day
-follow-up `f2ce8cf` adding a real Grad-CAM heatmap cloud to the 3D model itself.**
+**Phase 2 (3D anatomical explorer) — committed `585988d`, then a same-day
+follow-up `04eacd2` adding a real Grad-CAM heatmap cloud to the 3D model itself.**
 Reuses the design's own `lung-model.html` (three.js) almost byte-for-byte — only
 its import map was repointed from a live unpkg CDN to vendored local files
 (`app/pneumoscan_component/frontend/public/vendor/three/`, SHA-384 verified
@@ -2077,7 +2077,7 @@ already used). Verified live: 3D hotspot locations cross-checked against the rea
 drive 3D intensity (0 → fully gone).
 
 **A real gitignore bug found and fixed while finalizing the Phase 2 commit
-(`8a35d77`, amended before push).** The blanket Python `build/` rule in
+(`585988d`, amended before push).** The blanket Python `build/` rule in
 `.gitignore` was silently swallowing the vendored `three.module.js`/
 `three.core.js` because they sit under a path segment literally named `build/`
 (three.js's own release layout) — invisible locally (files were still on disk,
@@ -2091,7 +2091,7 @@ vendored-asset work in this repo: after `git add`, diff the commit stat against
 what you expect to see — a gitignore rule drops files with no error, and `git
 status` right after `git add` won't flag it either.**
 
-**Model-configuration switch, `a7e7608` (2026-09-28, owner-directed).** The
+**Model-configuration switch, `51f3e12` (2026-09-28, owner-directed).** The
 redesign's "single fixed configuration, no selector" requirement came from the
 Claude Design mockup's own README, not a deliberate privacy/accuracy decision —
 it had been implemented against `fedavg_secagg` (Secure Aggregation only,
@@ -2114,14 +2114,14 @@ the actual Cloud deployment: the identical sample X-ray that produced a confiden
 — near the decision boundary, 76%" under `fedavg_dp_eps4` — real, differently-
 calibrated behavior, not a rendering difference.
 
-**CLAUDE.md updated, `b861a4d`.** New resolved decision 16 covers both the
+**CLAUDE.md updated, `92488c1`.** New resolved decision 16 covers both the
 redesign and the model switch at governance level, with the before/after metrics
 table. Flagged, not silently fixed: §4's Technology Stack table still doesn't
 list React/npm/three.js — a real gap, left for the owner to decide whether/how to
 formalize.
 
 **Current state as of 2026-09-28: everything above is committed and pushed to
-`origin/main` (HEAD `b861a4d`). 255 tests passing.** Live at
+`origin/main` (HEAD `92488c1`). 255 tests passing.** Live at
 `pneumonia-fl-demo.streamlit.app`, verified working end-to-end on the actual
 Cloud deployment (not just locally) after each of the changes above, including a
 real full analysis run against the real `fedavg_dp_eps4` checkpoint. Zero console
