@@ -11,6 +11,7 @@ session, so a new session can resume without the transcript. Nothing here is new
 | `01_timeline.md` | the session in chronological order: what was asked, what was done, which commit it produced |
 | `02_tests_and_results.md` | every test run and measurement, in order, each tagged CURRENT or HISTORICAL |
 | `03_state_risks_next_steps.md` | open risks, operational gotchas, pending decisions, next steps |
+| `04_publication_updates_and_label_ambiguity.md` | later on 2026-10-26: PDFs regenerated and pushed, reference checks, related-work comparison, the Table II deployed-model answer, and the RSNA label-ambiguity analysis and recommendation (open) |
 
 ## Repository state when this was written
 
@@ -61,3 +62,8 @@ Use the CURRENT column. The superseded numbers remain in older documents (README
   evaluation protocol; §14 status/row 6/tests; pending decision 2 resolved; §15 items 5, 9–12). The statement above that `CLAUDE.md` was never modified applies
   to the work up to the archive commit only.
 - These changes (the three PDFs, the two regenerated charts, `CLAUDE.md`, the audit document and this addendum) were committed together in one local publication-documentation commit; the IEEE PDF became tracked in it. Whether that commit has been pushed is not recorded here — run `git status` and `git log origin/main..HEAD`.
+
+## Addendum 2 (later on 2026-10-26)
+
+Everything above was pushed: `origin/main` = `9c26cc3` (publication update `641e3cc`, related-work comparison `9c26cc3`). The tests, state and open items after that point are in
+`04_publication_updates_and_label_ambiguity.md`; where it differs from the state table above, it is the later and correct one.
