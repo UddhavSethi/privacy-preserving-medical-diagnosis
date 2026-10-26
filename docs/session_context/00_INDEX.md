@@ -20,9 +20,9 @@ session, so a new session can resume without the transcript. Nothing here is new
 | Audit commit | `7187c049307dcf8643831d043a6d830355e919bf` — "Audit: like-for-like evaluation, DP validity fixes, privacy-accounting fix, shadow-model privacy audit" (47 files) |
 | Follow-up commit | `bf59584d96be9f6e51aaa619f0dbdc41ba096049` — "Add deployment privacy-accounting verification and evidence summary" (4 files), parent `7187c04` |
 | This archive | committed on top of `bf59584` as a separate docs commit ("docs: preserve PneumoFL session context"); its hash is not recorded here because a commit cannot contain its own hash — run `git log -3` |
-| Pushed? | **No.** `origin/main` is still at `e3b2a77` (cover-page order); `7187c04`, `bf59584` and the archive commit are local only |
+| Pushed? | When this was written: **no** (`origin/main` at `e3b2a77`). **Later the same day all three commits were pushed** (fast-forward, `origin/main` = `e2fe291`); see the addendum |
 | Backups (local only, old history, never push) | `backup-before-trailer-rewrite` (= `082c8be`, history with Claude co-author trailers), `backup-v1-after-first-rewrite` (= `bb7e0a5`) |
-| Deliberately uncommitted | `docs/report/IEEE_Access_Manuscript.pdf` (stale, see below) |
+| Deliberately uncommitted (when written) | `docs/report/IEEE_Access_Manuscript.pdf` (stale then; regenerated and committed later, see the addendum) |
 | `CLAUDE.md` | never modified in this session; proposed edits are at the end of `docs/audit_2026-10.md` |
 | Tests | 293 passed on the tree at `bf59584` (255 originally + 34 audit + 4 for the deployment verifier) |
 | Docker | the committed code was deployed in Docker (6 rounds, CPU, TLS + node auth); reported ε matched an independent recomputation (3.991884 at round 6) — one seed, one run |
@@ -50,3 +50,14 @@ Use the CURRENT column. The superseded numbers remain in older documents (README
 3. Raw evidence is in gitignored `outputs/`; `docs/audit_raw_outputs_manifest.md` fingerprints 53 audit files and
    `docs/deployment_privacy_accounting_evidence.md` fingerprints the deployment evidence.
 4. Reproduce with `scripts/reproduce_audit.sh` (GPU recommended); regenerate tables with `uv run python scripts/make_audit_tables.py`.
+
+## Addendum (later on 2026-10-26, after the archive commit): deliverables regenerated and `CLAUDE.md` updated
+
+- The VIT project report (`docs/report/PneumoFL_VIT_Project_Report.pdf`, now 51 pages), `docs/report/metrics_final.pdf` and the IEEE Access manuscript
+  (`docs/report/IEEE_Access_Manuscript.pdf`, 6 pages) were regenerated on the macro-AUROC protocol; their tables and charts are read from the raw
+  result files by the generators in `docs/report/build/` (gitignored). They no longer carry the superseded claims listed in the reading guide above, except as
+  explicitly labelled corrections. The "stale deliverables" risk in `03_state_risks_next_steps.md` is resolved by this.
+- `CLAUDE.md` was updated at the owner's instruction after review of the proposals (new resolved decision 17; §4 SciPy row; §6 transport wording; §11
+  evaluation protocol; §14 status/row 6/tests; pending decision 2 resolved; §15 items 5, 9–12). The statement above that `CLAUDE.md` was never modified applies
+  to the work up to the archive commit only.
+- These changes (the three PDFs, the two regenerated charts, `CLAUDE.md`, the audit document and this addendum) were committed together in one local publication-documentation commit; the IEEE PDF became tracked in it. Whether that commit has been pushed is not recorded here — run `git status` and `git log origin/main..HEAD`.

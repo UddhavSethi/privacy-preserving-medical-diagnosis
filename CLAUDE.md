@@ -180,6 +180,7 @@ Approved components. **Exact pinned versions live in the dependency file
 | Containerization | **Docker Compose** | Multi-container prototype demonstration |
 | Testing | **pytest** | Unit + integration tests |
 | Numerics | **NumPy** | Array operations |
+| Statistics | **SciPy** | Student-t intervals, Clopper–Pearson bounds, normal log-pdf (`src/evaluation/{reporting,mia}.py`); declared explicitly 2026-10 (previously only a transitive dependency of scikit-learn) |
 | Tabular data | **pandas** | Manifests, splits, results tables |
 | Metrics | **scikit-learn** | AUROC/AUPRC and related evaluation metrics |
 | DICOM decoding | **pydicom** | Reading RSNA's DICOM images |
@@ -353,7 +354,7 @@ must be independently switchable for the ablation study.
 | **Federated Learning** | Raw patient images | Any party outside the hospital | Images never leave local storage |
 | **Differential Privacy** | Information encoded *inside* an update | Inference/reconstruction from updates | Opacus DP-SGD, (epsilon, delta) |
 | **Secure Aggregation** | An individual hospital's update | The server itself | Flower SecAgg+ masking |
-| **TLS + client auth** | Messages in transit | Network eavesdropping, tampering, impersonation | gRPC TLS + client authentication |
+| **TLS + client auth** | Messages in transit | Network eavesdropping, tampering, impersonation | gRPC server-side TLS + Flower node authentication (per-hospital registered ECDSA key pairs) — not mutual TLS |
 
 ### Threat model (must be stated explicitly in the paper)
 
@@ -501,14 +502,22 @@ The most persuasive single result available is **the federated global model outp
 individual hospital's locally-trained model** (row 3 vs. row 1) — this is the value proposition
 of federated learning, and it is strongest under genuine cross-institutional heterogeneity.
 
+**Evaluation protocol (corrected 2026-10-26, resolved decision 17).** Every row is scored on the same splits. The headline metric is the
+**macro (within-hospital) AUROC** — the mean of the three hospitals' own-test AUROCs — with per-hospital and pooled AUROC reported
+beside it; the pooled AUROC alone is not acceptable for cross-hospital comparison because hospitals differ in prevalence (72% vs 22%) and a
+pooled score also rewards telling the hospitals apart. Row 1 is therefore the per-hospital own-test evaluation **plus** the cross-hospital
+matrix (each local model on every hospital), not an average of own-test scores compared against a pooled number. Threshold-dependent
+metrics use thresholds chosen on validation data only (per hospital). The matched non-private baseline for the DP rows is FedAvg trained
+on the DP path's data view and loss (no augmentation, no class weights).
+
 ### 11.2 Metrics
 
 - **Classification:** **AUROC (primary)**, AUPRC, sensitivity/recall at fixed specificity,
   specificity, F1, balanced accuracy, confusion matrix.
   **Accuracy alone is not acceptable** on imbalanced medical data.
 - **Statistical rigor:** bootstrap 95% confidence intervals on AUROC.
-  Report **mean ± standard deviation over at least 3 seeds** — single-run numbers are not
-  credible in FL, where run-to-run variance is high.
+  Report **mean ± sample standard deviation (n − 1) over at least 3 seeds** (`aggregate_over_seeds` also returns the legacy population std and a
+  Student-t 95% half-width) — single-run numbers are not credible in FL, where run-to-run variance is high.
 - **Privacy:** reported **(epsilon, delta)** per configuration, from the accountant.
 - **Overhead (required, not optional):** bytes transmitted per client per round, total
   communication per experiment, wall-clock time per round, and client-side compute/memory cost.
@@ -614,6 +623,11 @@ the app's single fixed model configuration the real Differential Privacy checkpo
 (`fedavg_dp_eps4`) rather than the Secure-Aggregation-only one it launched with.
 Research/tests below are unaffected by any of this: 255 passing.
 
+**Update, 2026-10-26: scientific audit and re-evaluation.** A like-for-like re-evaluation (`docs/audit_2026-10.md`, generated tables
+`docs/audit_tables.md`, deployment evidence `docs/deployment_privacy_accounting_evidence.md`, session record `docs/session_context/`; commits
+`7187c04`, `bf59584`, `e2fe291`, pushed) corrected the paper's headline comparison, validated the DP implementation, found and fixed a
+privacy-accounting reporting defect, and measured ablation row 6 over three seeds — see resolved decision 17. Tests: 293 passing.
+
 | Item | Status |
 |---|---|
 | Source deck studied and analyzed | Done |
@@ -622,10 +636,10 @@ Research/tests below are unaffected by any of this: 255 passing.
 | Git repository | Initialized, remote configured, active history on `main`, pushed to origin |
 | Dependency file | `pyproject.toml` / `uv.lock`, pinned |
 | Dataset | **Decided (2026-08-29): Kermany = Hospital A; RSNA = Hospitals B & C** |
-| Code | All of Phases 0–5 (Stages 0–23) complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live; the full ablation campaign (Stage 21) ran 27/27 real live federated runs (3 seeds each) and produced the complete ablation table with real numbers for every row — local/centralized baselines, FedAvg (natural+balanced), FedAvg+SecAgg, FedAvg+DP (full epsilon sweep {1,2,4,8}, cleanly monotonic), and a supplementary Dirichlet synthetic non-IID sweep. Row 6 (full combined system) demonstrated live 2026-09-26 (resolved decision 14) — a single exploratory run, not yet a multi-seed ablation-table entry. Stage 22 audited the test suite against every CLAUDE.md §11.3 requirement (all already covered except the integration smoke test, now added) and added optional CI. Stage 23 produced the full documentation/reproducibility package (`README.md`, `docs/threat_model.md`, `docs/results.md`, `docs/reproducibility.md`, `docs/figures/`), including finding and fixing a real MLflow data-contamination bug in the integration smoke test. See `docs/SESSION_STATE.md` for current detail and the full table; this table is a coarse summary. |
-| Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`. |
+| Code | All of Phases 0–5 (Stages 0–23) complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live; the full ablation campaign (Stage 21) ran 27/27 real live federated runs (3 seeds each) and produced the complete ablation table with real numbers for every row — local/centralized baselines, FedAvg (natural+balanced), FedAvg+SecAgg, FedAvg+DP (full epsilon sweep {1,2,4,8}, cleanly monotonic), and a supplementary Dirichlet synthetic non-IID sweep. Row 6 (full combined system) was first demonstrated live 2026-09-26 (resolved decision 14), measured over 3 seeds in simulation in the October 2026 audit (resolved decision 17, macro AUROC 0.830 ± 0.010), and verified over a six-round Docker/TLS deployment. Stage 22 audited the test suite against every CLAUDE.md §11.3 requirement (all already covered except the integration smoke test, now added) and added optional CI. Stage 23 produced the full documentation/reproducibility package (`README.md`, `docs/threat_model.md`, `docs/results.md`, `docs/reproducibility.md`, `docs/figures/`), including finding and fixing a real MLflow data-contamination bug in the integration smoke test. See `docs/SESSION_STATE.md` for current detail and the full table; this table is a coarse summary. |
+| Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`; the full system (SecAgg+ and DP) via `scripts/run_deployment_full_system.sh`. |
 | Deployed app | Live at `pneumonia-fl-demo.streamlit.app`. Redesigned frontend (resolved decision 16), single fixed active configuration `fedavg_dp_eps4` (real Differential Privacy, ε=4/δ=1e-5) — see resolved decision 16 for the switch and its real accuracy/calibration cost. |
-| Tests | 255 passing |
+| Tests | 293 passing |
 
 ### Resolved decisions
 
@@ -878,6 +892,10 @@ Research/tests below are unaffected by any of this: 255 passing.
     demonstration that the combination is achievable, not a reportable row-6
     result yet.
 
+    **Superseded in part (2026-10-26):** the `epsilon_spent` values quoted above (3.368 in simulation, ≈3.60 in Docker) are *single-round*
+    values — the SecAgg+ client rebuilt its accountant every round (`docs/audit_2026-10.md` F11, fixed; resolved decision 17) — and row 6
+    has since been measured over three seeds.
+
 15. **ADR-1 GroupNorm fallback — the "whether/how far to scale" pending
     decision fully resolved (2026-09-26): option (b) turned out to already be
     done, option (a) resolved today.**
@@ -990,6 +1008,36 @@ Research/tests below are unaffected by any of this: 255 passing.
     throughout (no Python test changes were needed; this is a config +
     precomputed-artifact change, not a code change to `src/*`).
 
+17. **October 2026 scientific audit and re-evaluation (2026-10-26; owner-directed, CLAUDE.md updated at the owner's instruction after review of the proposals
+    in `docs/audit_2026-10.md`).** Full record: `docs/audit_2026-10.md`, `docs/audit_tables.md`, `docs/deployment_privacy_accounting_evidence.md`,
+    `docs/session_context/`; commits `7187c04`, `bf59584`, `e2fe291` (pushed). Reproduce with `scripts/reproduce_audit.sh`. Summary of what became
+    the approved state:
+
+    - **Headline metric is the macro (within-hospital) AUROC** (§11.1 protocol note). The pooled AUROC compared hospitals with 3× different prevalence and
+      exaggerated the cost of federation; the earlier statements "federation costs ≈ 9 AUROC points" and "federation did not beat the best single hospital"
+      are **withdrawn** (the latter compared different test sets). Corrected, 3 seeds, test split: centralized 0.893 ± 0.001; FedAvg 0.876 ± 0.006
+      (cost ≈ 0.017); SecAgg+ not measurably different (0.874 original run; 0.865 vs 0.869 matched, real pipeline); DP-matched non-private baseline 0.869;
+      DP ε = 8/4/2/1 (validation-selected recipe) 0.839/0.830/0.817/0.796, i.e. ε = 4 costs ≈ 0.038 AUROC and ≈ 0.065 sensitivity at matched specificity;
+      **row 6 (FedAvg + SecAgg+ + DP ε = 4, real SecAgg+, 3 seeds, simulation) 0.830 ± 0.010**. The deployed app model is unchanged (the original-recipe
+      seed-42 checkpoint); its figures describe that checkpoint only.
+    - **DP training changes (opt-in; legacy behavior is the default so published checkpoints reproduce):** `dp-loss-mode=per_sample_mean` (a sample's
+      gradient no longer depends on its batch companions), `class-weights=none` (label-count weights are outside the accountant), `dp-optimizer`, `device`.
+      The recipe (Adam, lr 3e-4, clip 1.0, 20 rounds, per-sample loss, no class weights) was selected on validation data only from a 48-run sweep; it
+      adds ≈ 0.011 macro AUROC at every ε over the original recipe.
+    - **Privacy-accounting defect found and fixed (audit F11):** the SecAgg+ DP client rebuilt its accountant every round, so logged ε was the single-round
+      value (2.12 in each of 20 rounds). Noise was always calibrated for the full run, so only the reported figure was wrong (optimistic). Fixed by persisting
+      the accountant history in `Context.state`. Corrected ε: 2.12 → 3.17 → 3.992 over 20 rounds; recomputed independently per hospital 3.9955/3.9939/3.9871.
+      Verified in a six-round Docker/TLS deployment of the committed code (30 distinct client processes per hospital = a fresh process per message;
+      logged ε equals the independent recomputation to six decimals; CPU, one seed).
+    - **Privacy evidence and claims:** see §15 items 9–12. The pooled number, the "mutually authenticated TLS" wording and the 0.5084 "real effect" reading
+      are superseded.
+    - **Tooling/dependencies:** `scipy==1.17.1` declared explicitly (pyproject, uv.lock, requirements.txt) at the owner's instruction; in-process FedAvg
+      harness `src/experiments/` (parity with Flower checked); SecAgg+ communication accounting (`src/federated/comm_accounting.py`): upload 2.10 MB vs
+      1.05 MB plain, control messages ≈ 2 KB; GPU use for DP training in simulation (Opacus ≈ 15× faster than one CPU core; containers stay CPU-only, DG-9).
+    - **Deliverables regenerated 2026-10-26** on the macro protocol: the VIT project report, `metrics_final.pdf`, and the IEEE Access manuscript.
+    - **Not done / open:** per-ε recipe re-tuning over 3 seeds; multi-seed and GPU Docker runs; gradient-inversion attack; external validation set;
+      calibration of the tuned private recipe; literature search supporting the novelty claim.
+
 ### Pending decisions (blocking — must be resolved with the owner before related work)
 
 1. **Which regime (natural vs. balanced) is the paper's primary headline vs.
@@ -997,18 +1045,9 @@ Research/tests below are unaffected by any of this: 255 passing.
    and the Dirichlet synthetic sweep (3, Stage 21) are now resolved — see the
    resolved-decisions list below — but the paper's primary-vs-secondary framing
    across natural/balanced/Dirichlet has not itself been decided.
-2. **Whether/when to scale the now-demonstrated "full system" (ablation row 6:
-   FedAvg + SecAgg+ + DP + TLS/client-auth) into a paper-credible, multi-seed
-   ablation-table entry.** The architectural question — deferred when Stage 17
-   was scoped (item 8 below), deferred again when Stage 21 was scoped (item
-   10 below), and deferred a third time 2026-09-02 — is resolved: resolved
-   decision 14 above shows the combination running live, both in simulation
-   and over a real Docker/TLS deployment. What remains undecided is the same
-   shape of question ADR-1's own fine-tuning fallback faced before resolved
-   decision 15 below settled it: whether/how far to invest in turning a
-   working single-run demonstration into a §11.2-credible (3-seed)
-   ablation-table row, versus leaving it as documented, verified future work.
-   Not raised for a decision on scope or timing yet.
+2. **Whether/when to scale ablation row 6 into a multi-seed entry — RESOLVED 2026-10-26** (resolved decision 17): measured over 3 seeds
+   through the real SecAgg+ pipeline in simulation (macro AUROC 0.830 ± 0.010, equal to the DP-only run to 0.0002 per seed) and
+   demonstrated over a six-round Docker/TLS deployment. Multi-seed Docker runs remain open.
 3. **DP + ADR-1 fine-tuning combination — VRAM smoke test passed 2026-09-24;
    single-seed real experiment run and committed 2026-09-24, still not a
    3-seed campaign (raised 2026-09-22).** The 3-seed fine-tuning campaign and
@@ -1079,7 +1118,8 @@ To be stated honestly in the paper. Concealing these weakens credibility more th
    calibration for two checkpoints (`docs/adr1_groupnorm_fallback.md` §10, §17) — one
    genuinely overconfident (softening helped, ECE improved ~46%), one already
    reasonably well-calibrated (sharpening barely moved it) — confirming calibration
-   behavior is real and checkpoint-specific, not a fixed property to assume.
+   behavior is real and checkpoint-specific, not a fixed property to assume. The DP rows' calibration (ECE ≈ 4×) was measured only for the
+   original private recipe; the validation-selected recipe's calibration was not re-measured (resolved decision 17).
 6. **Grad-CAM quantitative evaluation is complete (OPT-3), not merely qualitative.**
    `docs/gradcam_localization.md`: pointing-game/IoU against real RSNA bounding-box
    annotations. Also directly informed ADR-1's own GroupNorm-fallback work — see ADR-1
@@ -1094,10 +1134,20 @@ To be stated honestly in the paper. Concealing these weakens credibility more th
    empirically, zero id collisions across classes or the source's own train/test split, across
    all 5,856 files. Both sources therefore get full patient-level grouping in Stage 4; this
    limitation does not apply to this project's actual data.
-9. **Empirical privacy leakage is now demonstrated, not just asserted from literature
-   (OPT-2, complete).** `docs/privacy_attack.md`: a loss-based membership-inference
-   attack, run with DP off and at several epsilon values, measuring what the DP layer
-   actually mitigates rather than citing that it should.
+9. **Empirical privacy evidence is weak, and was over-read before the 2026-10 audit.** `docs/privacy_attack.md` and `docs/audit_2026-10.md`: the loss-based
+   membership-inference attack scores 0.50 ± 0.01 in every configuration and its own negative control (validation vs test, both non-members)
+   scores as high as its "signal" (0.504 vs 0.508), so it detects nothing; a shadow-model (LiRA) attack with 16–32 federated shadow models finds a
+   small signal without DP (AUROC 0.517) and none with DP at ε = 1, 4, 8 (0.498–0.499). This is evidence against the attacks run, not a bound on
+   leakage, and it cannot demonstrate the benefit of DP. The formal (ε, δ) guarantee, with the assumptions in item 10, is the privacy claim. Gradient
+   inversion was not run.
+10. **What ε covers.** ε is per hospital, per training run, at sample level, local-DP-style (ADR-2). Not accounted: the many runs of this study on the
+    same data (seeds, a 48-run recipe sweep, shadow-model audits), validation-based selection of recipe/thresholds/temperature/early stopping, and the
+    example counts sent for FedAvg weighting; the "original recipe" rows additionally used label-count class weights and a loss normalised by batch
+    weight (audit F4/F5; empirically immaterial). Opacus's subsampled-RDP analysis is taken as given and `secure_mode` is off. The reported ε relies
+    on per-node accountant state persisting across rounds (`src/privacy/accountant_state.py`).
+11. **Secure Aggregation at three clients is weak against collusion** (the aggregate minus two colluding hospitals' updates is the third's update), and TLS
+    / node authentication are not exercised by the simulation-based measured rows — only by the Docker deployment (one six-round CPU run, single seed).
+12. **DP cost is uneven across hospitals:** the smallest hospital (A) loses most under DP (macro-AUROC 0.923 → 0.865 at ε = 4, seed spread 0.03–0.06).
 
 ---
 

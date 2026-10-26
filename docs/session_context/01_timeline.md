@@ -67,4 +67,4 @@ Order of work (details and numbers in `02_tests_and_results.md`):
   No training code, privacy parameters, existing results, `CLAUDE.md` or the previous commit were changed.
 - This directory (`docs/session_context/`) saved at the user's request because the chat context had grown too large, then committed on its own
   ("docs: preserve PneumoFL session context") after review for secrets, personal data and machine-specific paths (none found).
-- Nothing was pushed; `origin/main` remains at `e3b2a77`.
+- At the time of writing nothing had been pushed (`origin/main` at `e3b2a77`); the three local commits were pushed afterwards at the owner's request (`origin/main` = `e2fe291`).

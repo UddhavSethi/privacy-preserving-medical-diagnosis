@@ -11,15 +11,15 @@
 - No external validation set; simulated hospitals on one machine; 3 clients (SecAgg+ and the aggregate reveal a lot at n=3).
 - GPU runs not bit-reproducible; the in-process harness matches Flower for rounds 1–4 then diverges within round-to-round noise.
 
-## Stale deliverables to regenerate (not done)
+## Stale deliverables to regenerate (resolved later on 2026-10-26 — see the addendum in 00_INDEX.md)
 - `docs/report/PneumoFL_VIT_Project_Report.pdf` and the IEEE manuscript still state pre-audit pooled-AUROC claims ("federation costs ~9 points",
   "did not beat the best single hospital", "misses more than half of pneumonia cases at the default threshold") and "mutually authenticated TLS"
   (the implementation is server TLS + Flower node authentication).
 
 ## Pending owner decisions
-- `CLAUDE.md` edits (six proposals at the end of `docs/audit_2026-10.md`): row 6 now 3-seed in simulation; ε figures 3.37/3.60 are single-round values;
+- (resolved later the same day: applied at the owner's instruction) `CLAUDE.md` edits (six proposals at the end of `docs/audit_2026-10.md`): row 6 now 3-seed in simulation; ε figures 3.37/3.60 are single-round values;
   headline metric = macro AUROC; privacy-attack wording; TLS wording; declare `scipy` (done in pyproject by explicit instruction).
-- Push of the local commits (`7187c04` and later) — never pushed without approval.
+- (resolved later the same day: pushed at the owner's request) Push of the local commits (`7187c04` and later) — never pushed without approval.
 - Whether to build GPU Docker images (needs NVIDIA container toolkit; changes the DG-9 CPU-only decision).
 
 ## Operational gotchas learned this session
