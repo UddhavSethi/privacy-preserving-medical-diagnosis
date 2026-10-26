@@ -254,6 +254,20 @@ def evaluate_classifier(
     return compute_metrics(test_labels.numpy(), probs).to_dict()
 
 
+def resolve_class_weights(labels: torch.Tensor, mode: str = "local", num_classes: int = 2) -> torch.Tensor:
+    """Class weights for the training loss. `"local"` (the project's original behavior)
+    computes inverse-frequency weights from THIS client's own labels; `"none"` uses
+    uniform weights. Added 2026-10 for the controlled FL-vs-centralized diagnosis
+    (docs/audit_2026-10.md, F2/F3): per-client balancing makes every hospital train
+    toward a 50% prior regardless of its true prevalence, and under DP the
+    label-count-derived weights are data-dependent quantities outside the accountant."""
+    if mode == "local":
+        return compute_class_weights(labels, num_classes)
+    if mode == "none":
+        return torch.ones(num_classes)
+    raise ValueError(f"unknown class-weight mode {mode!r} (expected 'local' or 'none')")
+
+
 def train_local_round(
     model: DenseNet121Head,
     train_features: torch.Tensor,  # (N, V, 1024)
@@ -262,6 +276,8 @@ def train_local_round(
     local_epochs: int,
     lr: float,
     batch_size: int,
+    class_weight_mode: str = "local",
+    eval_view_only: bool = False,
 ) -> dict:
     """A fixed-epoch-count local training round (Stage 13's federated client `fit`).
 
@@ -279,9 +295,12 @@ def train_local_round(
     """
     torch.manual_seed(seed)
     generator = torch.Generator().manual_seed(seed)
-    class_weights = compute_class_weights(train_labels)
+    device = train_features.device  # CPU unless the caller moved the features (GPU harness runs)
+    class_weights = resolve_class_weights(train_labels, class_weight_mode).to(device)
     opt = torch.optim.Adam(model.classifier.parameters(), lr=lr)
 
+    if eval_view_only:  # deterministic eval-style view only (the DP path's data view) — isolates augmentation from DP
+        train_features = train_features[:, -1:, :]
     n = train_features.shape[0]
     num_views = train_features.shape[1]
     model.train()
@@ -291,8 +310,8 @@ def train_local_round(
         for start in range(0, n, batch_size):
             batch_idx = perm[start : start + batch_size]
             view_idx = torch.randint(0, num_views, (len(batch_idx),), generator=generator)
-            x = train_features[batch_idx, view_idx]
-            y = train_labels[batch_idx]
+            x = train_features[batch_idx.to(device), view_idx.to(device)]
+            y = train_labels[batch_idx.to(device)]
             out = model.classifier(x)
             loss = F.cross_entropy(out, y, weight=class_weights)
             opt.zero_grad()
@@ -302,7 +321,7 @@ def train_local_round(
 
     avg_loss = total_loss / (n * local_epochs)
     return {
-        "classifier_state": {k: v.clone() for k, v in model.classifier.state_dict().items()},
+        "classifier_state": {k: v.detach().cpu().clone() for k, v in model.classifier.state_dict().items()},
         "num_examples": n,
         "train_loss": avg_loss,
     }

@@ -25,7 +25,7 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from flwr.app import Context, Message, MetricRecord, RecordDict
+from flwr.app import ConfigRecord, Context, Message, MetricRecord, RecordDict
 from flwr.clientapp import ClientApp
 from opacus import PrivacyEngine
 
@@ -34,6 +34,7 @@ from src.evaluation.overhead import classifier_payload_size_bytes, measure_wall_
 from src.federated.serialization import array_record_to_classifier_state, classifier_state_to_array_record
 from src.models.densenet_head import DenseNet121Head
 from src.privacy.accounting import compute_noise_multiplier, compute_total_steps
+from src.privacy.accountant_state import apply_history_json, history_to_json
 from src.privacy.dp import make_privacy_engine, train_local_round_dp
 from src.training.trainer import HospitalFeatures, load_hospital_features, train_local_round
 
@@ -107,6 +108,7 @@ def train(msg: Message, context: Context) -> Message:
 
     dp_enabled = bool(context.run_config.get("dp-enabled", False))
     metrics = {}
+    privacy_engine = None
 
     # Stage 20 (CLAUDE.md section 11.2): wall-clock and payload size are
     # first-class measured outputs, not afterthoughts — wrapping exactly the
@@ -119,6 +121,8 @@ def train(msg: Message, context: Context) -> Message:
             privacy_engine, noise_multiplier = _get_privacy_engine(
                 hospital, context, dataset_size=len(features.train_labels)
             )
+            if "dp_accountant" in context.state:  # a fresh process/engine: resume the accountant (audit F11)
+                apply_history_json(privacy_engine, context.state["dp_accountant"]["history"])
             target_delta = float(context.run_config["target-delta"])
             result = train_local_round_dp(
                 model,
@@ -132,9 +136,15 @@ def train(msg: Message, context: Context) -> Message:
                 max_grad_norm=float(context.run_config["max-grad-norm"]),
                 target_delta=target_delta,
                 privacy_engine=privacy_engine,
+                loss_mode=str(context.run_config.get("dp-loss-mode", "legacy_weighted_mean")),
+                class_weight_mode=str(context.run_config.get("class-weights", "local")),
+                optimizer=str(context.run_config.get("dp-optimizer", "adam")),
+                momentum=float(context.run_config.get("dp-momentum", 0.0)),
+                device=str(context.run_config.get("device", "cpu")),
             )
             metrics["epsilon_spent"] = result["epsilon_spent"]
             metrics["noise_multiplier"] = noise_multiplier
+            context.state["dp_accountant"] = ConfigRecord({"history": history_to_json(privacy_engine)})
         else:
             result = train_local_round(
                 model,
@@ -144,6 +154,7 @@ def train(msg: Message, context: Context) -> Message:
                 local_epochs=local_epochs,
                 lr=lr,
                 batch_size=batch_size,
+                class_weight_mode=str(context.run_config.get("class-weights", "local")),
             )
 
     metrics["train_loss"] = result["train_loss"]

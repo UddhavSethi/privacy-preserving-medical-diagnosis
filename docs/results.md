@@ -50,7 +50,7 @@ natural regime. This is the honest gap the ablation ladder exists to quantify, n
 surprise to explain away: it reflects both the frozen-backbone/head-only capacity cap
 (`CLAUDE.md` ADR-1) and genuine cross-hospital heterogeneity.
 
-**Federation still beats any single hospital training alone** — row 3 (0.8144) does
+**Federation does NOT beat the local models on this row's metric (see the 2026-10 correction below)** — row 3 (0.8144) does
 *not* clear row 1 (0.8924, the average of three already-well-performing local
 models) in this dataset. This is the honest result, not the hoped-for one: the
 paper's strongest available framing (federation recovering or exceeding the best
@@ -335,6 +335,25 @@ AUROC is test-set label ambiguity that retraining does not recover. The filtered
 model is therefore not a candidate replacement for the project's label harmonization
 (DG-2) or for the deployed app model; it is reported to bound how much of the
 limitation is trainable-away.
+
+## 2026-10 audit and re-evaluation (supersedes the headline comparisons above)
+
+A scientific audit (`docs/audit_2026-10.md`, tables in `docs/audit_tables.md`, all regenerated from
+raw files) found that the pooled-AUROC comparisons in the ladder above are not like-for-like, so the
+headline sentences "federation costs ≈ 9 AUROC points" and "federation did not beat the local models"
+should not be quoted. Re-scored under one protocol (3 seeds, test split, macro = mean of within-hospital AUROCs):
+
+| Configuration | Macro AUROC | Sens. @ per-hospital 90%-spec threshold |
+|---|---|---|
+| Centralized | 0.893 ± 0.001 | 0.686 ± 0.013 |
+| FedAvg (project recipe) | 0.876 ± 0.006 | 0.638 ± 0.020 |
+| FedAvg + SecAgg+ (original run) | 0.874 ± 0.007 | 0.635 ± 0.019 |
+| FedAvg, DP-matched recipe | 0.869 ± 0.005 | 0.603 ± 0.012 |
+| FedAvg + DP ε=1 / 2 / 4 / 8 (validation-tuned recipe) | 0.796 / 0.817 / 0.830 / 0.839 | 0.476 / 0.509 / 0.538 / 0.556 |
+| Row 6: FedAvg + SecAgg+ + DP ε=4 (real SecAgg+, simulation) | 0.830 ± 0.010 | 0.538 |
+
+Rows 1–5 above are unchanged raw results and remain valid as what they measured; the DP rows above used
+the original recipe (which also carries the F4/F5/F11 caveats in the audit).
 
 ## Statistical rigor
 

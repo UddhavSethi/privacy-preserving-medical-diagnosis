@@ -2137,3 +2137,37 @@ errors observed throughout.
   width, `prefers-reduced-motion` emulation) is only partially exercised.
 - §4's Technology Stack table doesn't yet list the new frontend stack (see
   CLAUDE.md resolved decision 16's own note) — raised, not resolved.
+
+---
+
+## §17. October 2026 scientific audit (2026-10-26)
+
+Full write-up: `docs/audit_2026-10.md`; generated tables: `docs/audit_tables.md`
+(`scripts/make_audit_tables.py`); one-command reproduction: `scripts/reproduce_audit.sh`.
+
+What changed in the code (all backward compatible; defaults reproduce the original behavior):
+`src/experiments/` (in-process FedAvg harness `fl_sim.py`, shared evaluation protocol),
+`src/evaluation/mia.py` (membership-inference statistics, LiRA, ε lower bounds),
+`src/privacy/dp.py` (`dp_training_loss` per-sample loss, SGD option, `device`),
+`src/privacy/accountant_state.py` (accountant persistence across rounds), `src/training/trainer.py`
+(class-weight / eval-view options), `src/federated/comm_accounting.py` (SecAgg+ byte accounting mod),
+both client apps (run-config keys `dp-loss-mode`, `dp-optimizer`, `dp-momentum`, `class-weights`, `device`),
+`src/evaluation/reporting.py` (sample std + t-interval). 34 new tests (289 passing).
+
+Defects found: row 1 not like-for-like; pooled AUROC conflates site discrimination; DP "cost" measured
+against a mismatched baseline; DP loss not per-sample decomposable; class weights outside the accountant;
+Adam under DP noise mistuned; loss-attack "signal" inside its own negative control; and — found
+by running row 6 — the SecAgg+ DP client re-created its accountant every round (reported ε was the
+single-round 2.12, cumulative is 3.992).
+
+Operational notes for whoever continues: multiprocessing pools with long-lived workers deadlocked
+(futex) three times on this machine — use `maxtasksperchild=1` (done in every script). Flower's
+simulation SuperLink process outlives a `flwr run` and fixes its environment at first start, so
+environment-variable configuration (`PNEUMO_COMM_LOG`) reaches only the first run; records carry
+`run_id` for that reason. Simulated clients need `--federation-config "num-supernodes=3
+client-resources-num-gpus=0.3"` to see the GPU. `scripts/run_full_system_campaign.py` swaps and
+restores `[tool.flwr.app.components]`; a hard kill leaves it swapped (restore by hand).
+Housekeeping: partial shadow-model folders `outputs/mia/dp_eps1`, `outputs/mia/dp_eps8` from an
+interrupted run, and smoke-test files in `outputs/comm/`, were deleted by mistake and regenerated.
+
+Nothing was committed to `CLAUDE.md`; proposed edits are listed at the end of the audit document.

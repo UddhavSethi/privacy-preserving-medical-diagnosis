@@ -46,13 +46,16 @@ import numpy as np
 import torch
 from flwr.client import ClientApp, NumPyClient
 from flwr.client.mod import secaggplus_mod
+from flwr.app import ConfigRecord
 from flwr.common import Context
 from opacus import PrivacyEngine
 
 from src.evaluation.metrics import compute_metrics
 from src.evaluation.overhead import classifier_payload_size_bytes, measure_wall_clock
+from src.federated.comm_accounting import byte_counting_mod
 from src.models.densenet_head import DenseNet121Head
 from src.privacy.accounting import compute_noise_multiplier, compute_total_steps
+from src.privacy.accountant_state import apply_history_json, history_to_json
 from src.privacy.dp import make_privacy_engine, train_local_round_dp
 from src.training.trainer import HospitalFeatures, load_hospital_features, train_local_round
 
@@ -91,6 +94,12 @@ class SecAggClient(NumPyClient):
         target_delta: float = 1e-5,
         max_grad_norm: float = 1.0,
         num_server_rounds: int = 1,
+        dp_loss_mode: str = "legacy_weighted_mean",
+        class_weight_mode: str = "local",
+        dp_optimizer: str = "adam",
+        dp_momentum: float = 0.0,
+        device: str = "cpu",
+        context: Context | None = None,
     ) -> None:
         self.features = features
         self.seed = seed
@@ -103,6 +112,12 @@ class SecAggClient(NumPyClient):
         self.target_delta = target_delta
         self.max_grad_norm = max_grad_norm
         self.num_server_rounds = num_server_rounds
+        self.dp_loss_mode = dp_loss_mode
+        self.class_weight_mode = class_weight_mode
+        self.dp_optimizer = dp_optimizer
+        self.dp_momentum = dp_momentum
+        self.device = device
+        self.context = context  # its `state` persists across rounds even though this object does not
         # Cached lazily and reused across every `fit()` call this same
         # long-lived client process makes — required for the RDP accountant's
         # spent-epsilon to accumulate correctly across rounds (same
@@ -146,6 +161,8 @@ class SecAggClient(NumPyClient):
             if self.dp_enabled:
                 eval_view_features = self.features.train_features[:, -1, :]  # deterministic view only
                 privacy_engine, noise_multiplier = self._get_privacy_engine()
+                if self.context is not None and "dp_accountant" in self.context.state:
+                    apply_history_json(privacy_engine, self.context.state["dp_accountant"]["history"])  # audit F11
                 result = train_local_round_dp(
                     self.model,
                     eval_view_features,
@@ -158,9 +175,16 @@ class SecAggClient(NumPyClient):
                     max_grad_norm=self.max_grad_norm,
                     target_delta=self.target_delta,
                     privacy_engine=privacy_engine,
+                    loss_mode=self.dp_loss_mode,
+                    class_weight_mode=self.class_weight_mode,
+                    optimizer=self.dp_optimizer,
+                    momentum=self.dp_momentum,
+                    device=self.device,
                 )
                 metrics["epsilon_spent"] = result["epsilon_spent"]
                 metrics["noise_multiplier"] = noise_multiplier
+                if self.context is not None:
+                    self.context.state["dp_accountant"] = ConfigRecord({"history": history_to_json(privacy_engine)})
             else:
                 result = train_local_round(
                     self.model,
@@ -170,6 +194,7 @@ class SecAggClient(NumPyClient):
                     local_epochs=self.local_epochs,
                     lr=self.lr,
                     batch_size=self.batch_size,
+                    class_weight_mode=self.class_weight_mode,
                 )
         metrics["train_loss"] = result["train_loss"]
         metrics["wall_clock_seconds"] = timing.wall_clock_seconds
@@ -211,7 +236,14 @@ def client_fn(context: Context):
         target_delta=float(context.run_config.get("target-delta", 1e-5)),
         max_grad_norm=float(context.run_config.get("max-grad-norm", 1.0)),
         num_server_rounds=int(context.run_config["num-server-rounds"]),
+        dp_loss_mode=str(context.run_config.get("dp-loss-mode", "legacy_weighted_mean")),
+        class_weight_mode=str(context.run_config.get("class-weights", "local")),
+        dp_optimizer=str(context.run_config.get("dp-optimizer", "adam")),
+        dp_momentum=float(context.run_config.get("dp-momentum", 0.0)),
+        device=str(context.run_config.get("device", "cpu")),
+        context=context,
     ).to_client()
 
 
-app = ClientApp(client_fn=client_fn, mods=[secaggplus_mod])
+# byte_counting_mod is outermost so it sees every SecAgg+ protocol message; a no-op unless PNEUMO_COMM_LOG is set.
+app = ClientApp(client_fn=client_fn, mods=[byte_counting_mod, secaggplus_mod])

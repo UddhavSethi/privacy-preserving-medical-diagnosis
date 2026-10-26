@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
+from scipy import stats
 
 MIN_RECOMMENDED_SEEDS = 3
 
@@ -16,9 +17,14 @@ MIN_RECOMMENDED_SEEDS = 3
 @dataclass(frozen=True)
 class AggregatedMetric:
     mean: float
-    std: float
+    std: float  # POPULATION std (ddof=0) — the project's historical convention, kept so published tables reproduce
     n_seeds: int
     values: list
+    # Added 2026-10 (docs/audit_2026-10.md F9): with n=3 the ddof=0 std understates the spread by
+    # sqrt(3/2) ~ 1.22x, and "mean +/- std" invites reading it as an interval. These two are the
+    # statistically standard quantities and should be preferred in any new table.
+    sample_std: float = float("nan")  # ddof=1
+    ci95_half_width: float = float("nan")  # Student-t 95% half-width of the mean over seeds
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -29,11 +35,16 @@ def aggregate_over_seeds(values: list) -> AggregatedMetric:
     is a legitimate intermediate state — but `n_seeds` is always recorded, so a table
     built from too few seeds is visible in the data, not silently presented as final."""
     arr = np.asarray(values, dtype=float)
+    n = int(np.sum(~np.isnan(arr)))
+    sample_std = float(np.nanstd(arr, ddof=1)) if n > 1 else float("nan")
+    ci95 = float(stats.t.ppf(0.975, n - 1) * sample_std / np.sqrt(n)) if n > 1 else float("nan")
     return AggregatedMetric(
         mean=float(np.nanmean(arr)),
         std=float(np.nanstd(arr)),
         n_seeds=len(values),
         values=[float(v) for v in values],
+        sample_std=sample_std,
+        ci95_half_width=ci95,
     )
 
 

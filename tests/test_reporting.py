@@ -59,3 +59,14 @@ def test_save_results_creates_parent_dirs(tmp_path):
     path = tmp_path / "nested" / "dir" / "results.json"
     save_results({"a": 1}, path)
     assert path.exists()
+
+
+def test_aggregate_reports_sample_std_and_t_interval_alongside_legacy_population_std():
+    import math
+    from src.evaluation.reporting import aggregate_over_seeds
+    agg = aggregate_over_seeds([0.80, 0.82, 0.84])
+    assert agg.std == pytest.approx(math.sqrt(2 / 3) * 0.02, rel=1e-9)        # ddof=0 (legacy, unchanged)
+    assert agg.sample_std == pytest.approx(0.02, rel=1e-9)                     # ddof=1
+    assert agg.ci95_half_width == pytest.approx(4.302652729911275 * 0.02 / math.sqrt(3), rel=1e-6)
+    single = aggregate_over_seeds([0.8])
+    assert math.isnan(single.sample_std) and math.isnan(single.ci95_half_width)

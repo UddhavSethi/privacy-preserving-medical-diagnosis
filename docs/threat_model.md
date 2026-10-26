@@ -89,8 +89,26 @@ and federated.
 - Not validated for clinical use; not a medical device.
 - Not a real multi-institution deployment — hospitals are simulated
   processes/containers on one machine (`CLAUDE.md` §15, item 1).
-- Not empirically demonstrated privacy leakage or its absence — the claim that
-  "raw updates can leak patient information" is supported by citation to prior
-  work, not by an attack this project ran. An empirical membership-inference /
-  gradient-inversion study is a named, approved-in-concept future direction
-  (`CLAUDE.md` §16.1) that has not been executed.
+- Not a proof of privacy from the empirical attacks. Membership-inference results
+  (`docs/privacy_attack.md`, `docs/audit_2026-10.md`) are evidence against the specific
+  attacks run, nothing more: a low attack score does not bound leakage, and the formal
+  (epsilon, delta) guarantee is the privacy claim. Gradient inversion has not been run.
+- Not mutual TLS. Transport is gRPC over **server-side TLS**; hospitals authenticate with
+  Flower node authentication (a per-hospital ECDSA key pair registered with the server, used
+  to sign requests). Both parties are authenticated, but the client identity is established at
+  the application layer, not by a client certificate in the TLS handshake.
+- Not a strong Secure Aggregation guarantee at three clients. SecAgg+ hides one client's
+  update from the server only against collusion below the threshold; with `num_shares=3`,
+  `reconstruction_threshold=2` the server plus ONE colluding hospital still cannot isolate a
+  third hospital's update, but the server plus TWO colluding hospitals trivially can (the
+  aggregate minus the two known updates). In-scope collusion is therefore limited to a single
+  hospital, and with only three participants the aggregate itself reveals a lot.
+- Not a claim that TLS and client authentication were active in every experiment: the
+  simulation engine has no network, so the measured ablation rows exercise FedAvg, SecAgg+ and
+  DP only; TLS and node authentication are exercised by the Docker Compose deployment
+  (`scripts/run_deployment.sh`). `docs/audit_2026-10.md` lists which mechanism was active in
+  which run.
+- DP is sample-level and per hospital, and its epsilon is the accountant's value for a single
+  hospital's own training set. Class weights derived from a hospital's label counts, early
+  stopping, threshold and temperature selection on validation data, and the released
+  number of training examples are outside the accountant.

@@ -1,0 +1,59 @@
+# Audit raw-output manifest (generated)
+
+`outputs/` is gitignored, so these files are not in the repository; this manifest fingerprints them (`scripts/make_audit_manifest.py`). GPU training is not bit-reproducible, so a re-run will not match the checkpoint hashes; the result JSON files are what the tables are built from.
+
+| file | bytes | sha256 |
+|---|---|---|
+| `outputs/ablation_logs/secagg_dp_eps4_commcheck_seed42.log` | 100387 | `015feb48bac5b172…` |
+| `outputs/ablation_logs/secagg_dp_eps4_seed123.log` | 100425 | `986632554b14847c…` |
+| `outputs/ablation_logs/secagg_dp_eps4_seed2024.log` | 99938 | `49cc279cb2978487…` |
+| `outputs/ablation_logs/secagg_dp_eps4_seed42.log` | 100426 | `139a09a660dd5e4a…` |
+| `outputs/ablation_logs/secagg_dp_eps4_v2_seed123.log` | 100300 | `ed3da07726eaf9bb…` |
+| `outputs/ablation_logs/secagg_dp_eps4_v2_seed2024.log` | 99877 | `8b0bd5a406fe155a…` |
+| `outputs/ablation_logs/secagg_dp_eps4_v2_seed42.log` | 102530 | `f4637b26ef690af6…` |
+| `outputs/ablation_logs/secagg_matched_commcheck_seed42.log` | 72755 | `73ab4fec9eb81ace…` |
+| `outputs/ablation_logs/secagg_matched_seed123.log` | 72672 | `9cf6c4ec5219f0ab…` |
+| `outputs/ablation_logs/secagg_matched_seed2024.log` | 72653 | `2d895cdc32997fb7…` |
+| `outputs/ablation_logs/secagg_matched_seed42.log` | 73055 | `12366b1ab7ef4c91…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps1.0_seed123.pt` | 1054269 | `fb603f7612a146ed…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps1.0_seed2024.pt` | 1054279 | `dd8cb3a2ebd1080c…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps1.0_seed42.pt` | 1054259 | `83639c798e765831…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps2.0_seed123.pt` | 1054269 | `d19e1dacf534402d…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps2.0_seed2024.pt` | 1054279 | `16b44753ea1116cc…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps2.0_seed42.pt` | 1054259 | `4c9bbcf58ff6d6d8…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps4.0_seed123.pt` | 1054269 | `a5616c4b01e398b1…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps4.0_seed2024.pt` | 1054279 | `c0d45b94987bc051…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps4.0_seed42.pt` | 1054259 | `a050d99b0a0155bc…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps8.0_seed123.pt` | 1054269 | `c9c218880069aa77…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps8.0_seed2024.pt` | 1054279 | `afacf2309b5fea74…` |
+| `outputs/checkpoints/exp2026/dp_tuned_eps8.0_seed42.pt` | 1054259 | `09fa89fed94e18e5…` |
+| `outputs/checkpoints/exp2026/fedavg_matched_seed123.pt` | 1054259 | `73968af5e6b50f93…` |
+| `outputs/checkpoints/exp2026/fedavg_matched_seed2024.pt` | 1054269 | `148d39218a1e3acf…` |
+| `outputs/checkpoints/exp2026/fedavg_matched_seed42.pt` | 1054185 | `0b3545c26cc3ce7e…` |
+| `outputs/checkpoints/exp2026/secagg_dp_eps4_commcheck_seed42.pt` | 2105997 | `a8cee60ae9bd7d99…` |
+| `outputs/checkpoints/exp2026/secagg_dp_eps4_seed123.pt` | 2105907 | `6565c2e1576e281e…` |
+| `outputs/checkpoints/exp2026/secagg_dp_eps4_seed2024.pt` | 2105917 | `61f717c3d982625a…` |
+| `outputs/checkpoints/exp2026/secagg_dp_eps4_seed42.pt` | 2105833 | `5a8f3472827f345b…` |
+| `outputs/checkpoints/exp2026/secagg_dp_eps4_v2_seed123.pt` | 2105937 | `26bc875681f58d9e…` |
+| `outputs/checkpoints/exp2026/secagg_dp_eps4_v2_seed2024.pt` | 2105947 | `e4fa1da4a5ab078c…` |
+| `outputs/checkpoints/exp2026/secagg_dp_eps4_v2_seed42.pt` | 2105927 | `3a9db5032a848e82…` |
+| `outputs/checkpoints/exp2026/secagg_matched_commcheck_seed42.pt` | 2105997 | `8729ece1848f04c7…` |
+| `outputs/checkpoints/exp2026/secagg_matched_seed123.pt` | 2105907 | `82e81c6db33f259b…` |
+| `outputs/checkpoints/exp2026/secagg_matched_seed2024.pt` | 2105917 | `1f4785aa5261178b…` |
+| `outputs/checkpoints/exp2026/secagg_matched_seed42.pt` | 2105833 | `250e5faa756c3a0f…` |
+| `outputs/comm/secagg_matched_seed42.jsonl` | 355215 | `9633e3ca5abe553c…` |
+| `outputs/mia/dp_eps1/analysis.json` | 912 | `03f0b695512177fd…` |
+| `outputs/mia/dp_eps1/config.json` | 101 | `f44aad253957453e…` |
+| `outputs/mia/dp_eps4/analysis.json` | 857 | `cf32db5309464559…` |
+| `outputs/mia/dp_eps4/config.json` | 101 | `338f14d5c199d63c…` |
+| `outputs/mia/dp_eps8/analysis.json` | 919 | `c9b1372662548f8c…` |
+| `outputs/mia/dp_eps8/config.json` | 101 | `910fbb2044961864…` |
+| `outputs/mia/nondp/analysis.json` | 979 | `5f3d565502dab808…` |
+| `outputs/mia/nondp/config.json` | 100 | `44eb6aadc55a5400…` |
+| `outputs/results/audit_mia_existing.json` | 13786 | `ea7f7cf060d4975c…` |
+| `outputs/results/audit_per_hospital_eval.json` | 34263 | `9894354e72491a7e…` |
+| `outputs/results/exp_dp_sweep_val.jsonl` | 120352 | `5fe361f28575310a…` |
+| `outputs/results/exp_final_ablation.json` | 253023 | `1ad1469d25d8de79…` |
+| `outputs/results/exp_fl_diagnosis_val.json` | 5234 | `ad398b1efca04392…` |
+| `outputs/results/selected_dp_config.json` | 22956 | `aa08fb5342c6ecab…` |
+| `outputs/results/verified_epsilon.json` | 823 | `0efac8698fbabc48…` |

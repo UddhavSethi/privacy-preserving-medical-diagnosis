@@ -16,6 +16,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 NUM_ROUNDS="${NUM_ROUNDS:-3}"
+EXTRA_RUN_CONFIG="${EXTRA_RUN_CONFIG:-}"  # extra `--run-config` keys, e.g. the full-system (SecAgg+ and DP) settings; default: none (unchanged behavior)
 CONTROL_API_PORT=9093
 FLWR_HOME="$(pwd)/.flwr_home"
 
@@ -84,7 +85,7 @@ sleep 8
 uv run flwr supernode list deployment
 
 echo "=== Running ${NUM_ROUNDS}-round federated training over Docker ==="
-uv run flwr run . deployment --run-config "num-server-rounds=${NUM_ROUNDS}" --stream
+uv run flwr run . deployment --run-config "num-server-rounds=${NUM_ROUNDS} ${EXTRA_RUN_CONFIG}" --stream
 
 echo
 echo "Deployment run complete."

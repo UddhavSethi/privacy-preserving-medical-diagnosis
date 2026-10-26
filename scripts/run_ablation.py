@@ -75,13 +75,13 @@ def _swap_components(target: str) -> None:
     PYPROJECT.write_text(new_text)
 
 
-def _run_flwr(run_config: str, log_name: str) -> bool:
+def _run_flwr(run_config: str, log_name: str, federation_config: str = "num-supernodes=3") -> bool:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{log_name}.log"
     cmd = [
         "uv", "run", "flwr", "run", ".",
         "--run-config", run_config,
-        "--federation-config", "num-supernodes=3",
+        "--federation-config", federation_config,
         "--stream",  # load-bearing, not cosmetic: without --stream, `flwr run`
         # submits the run and returns immediately rather than blocking until
         # it finishes — found via this script's own first real launch, not by

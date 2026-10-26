@@ -44,7 +44,11 @@ layer. Full table, figures, and interpretation: **[`docs/results.md`](docs/resul
 
 ![Full ablation table](docs/figures/ablation_table_chart.png)
 
-Headline findings: federation trails centralized training by ~9 AUROC points (natural
+> **October 2026 audit:** the pooled-AUROC comparisons below are superseded by a like-for-like
+> re-evaluation — see [`docs/audit_2026-10.md`](docs/audit_2026-10.md). Under one protocol, federation costs
+> ≈ 0.017 macro (within-hospital) AUROC, not ~9 points, and DP at ε=4 costs ≈ 0.038 more.
+
+Headline findings of the original ladder: federation trails centralized training by ~9 pooled-AUROC points (natural
 regime); Secure Aggregation is nearly free on accuracy; the DP epsilon sweep is cleanly
 monotonic (tighter privacy costs accuracy, as expected); non-IID heterogeneity (Dirichlet
 alpha) has the largest single effect of anything measured. See `docs/results.md` for the
@@ -60,6 +64,7 @@ dataset, and why.
 | `docs/SESSION_STATE.md` | Detailed, per-stage development log and continuity notes |
 | `docs/threat_model.md` | Threat actors, protection layers, known architectural tensions |
 | `docs/results.md` | The ablation table, figures, and interpretation |
+| `docs/audit_2026-10.md` | Scientific audit and re-evaluation (like-for-like protocol, DP validity, privacy audit); tables in `docs/audit_tables.md`, reproduce with `scripts/reproduce_audit.sh` |
 | `docs/calibration.md` | OPT-1: ECE, Brier score, and risk-coverage analysis of MC Dropout confidence |
 | `docs/privacy_attack.md` | OPT-2: empirical membership-inference attack against trained checkpoints |
 | `docs/gradcam_localization.md` | OPT-3: quantitative Grad-CAM evaluation against RSNA bounding boxes |

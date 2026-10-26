@@ -71,13 +71,16 @@ project's architecture (ADR-1's frozen backbone + a ~262K-parameter head with
 Dropout p=0.3 and early stopping) appears to substantially resist the kind of
 overfitting a loss-based attack depends on, independent of DP or federation.
 
-**Centralized training is the only configuration with a small, seed-consistent
-signal above chance** (0.5084 ± 0.0011 — the tightest std of any row, i.e. a real,
-repeatable effect rather than noise): the undefended model does fit its training
-set measurably better than held-out data, exactly as expected, and it is the
-correct thing for this to be the row with the *most* leakage — a sanity check that
-the attack methodology has some genuine sensitivity, not zero statistical power
-everywhere.
+**Centralized training has the highest attack AUROC (0.5084 ± 0.0011), but this
+should NOT be read as demonstrated leakage — correction, 2026-10 audit.** A tight
+seed-to-seed std only shows the three checkpoints agree, not that the signal is
+membership. The audit's negative control (`scripts/audit_mia_existing.py`) scores
+validation vs. test examples, both non-members, and obtains 0.5038 for the same
+centralized checkpoints: almost the whole 0.5084 is split-to-split distribution
+shift, not membership. This attack therefore has essentially no demonstrated power in
+this setup, which is why the shadow-model (LiRA) audit in `docs/audit_2026-10.md` was
+added. (The original wording here treated the 0.5084 as a sanity check of the attack's
+sensitivity; the control shows it is not distinguishable from noise.)
 
 **The federated configurations — with or without DP — show no attack signal
 above 0.5, and if anything a small effect in the opposite direction**: attack
@@ -118,3 +121,11 @@ not a reportable privacy failure.
 4. **A stronger attack is the natural next step**, not implemented here: this
    document should be read as "loss-based MIA finds no leakage at this
    sensitivity," not "this system has been shown to leak nothing."
+
+
+## Audit addendum (2026-10)
+
+See `docs/audit_2026-10.md` §F7 for the re-audit with bootstrap intervals, a negative
+control, class-balanced scoring, TPR at low FPR, and a shadow-model (LiRA) attack. In short:
+the loss attack cannot distinguish any configuration from chance, so the table above must
+not be used to claim that DP reduced measured leakage.

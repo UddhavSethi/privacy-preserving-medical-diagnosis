@@ -21,6 +21,8 @@ dependencies = [
     "numpy==2.4.6",
     "pandas==2.3.3",
     "scikit-learn==1.9.0",
+    "scipy==1.17.1",  # imported directly by src/evaluation/{mia,reporting}.py (t-intervals, Clopper-Pearson,
+    # normal log-pdf); previously present only as scikit-learn's transitive dependency. Declared 2026-10, owner-directed.
     "pydicom==3.0.2",
     "pillow==12.3.0",
     "tqdm==4.70.0",
@@ -118,6 +120,17 @@ dp-enabled = false
 target-epsilon = 4.0
 target-delta = 0.00001
 max-grad-norm = 1.0
+# Audit follow-up (docs/audit_2026-10.md F4-F6): selectable DP training choices. Defaults
+# reproduce the original behavior exactly, so every existing run and checkpoint is unchanged.
+# dp-loss-mode: "legacy_weighted_mean" | "per_sample_mean" (batch-independent per-sample
+#   gradients, as DP-SGD's sensitivity argument requires); dp-optimizer: "adam" | "sgd";
+# class-weights: "local" (inverse frequency of the client's own labels) | "none".
+dp-loss-mode = "legacy_weighted_mean"
+dp-optimizer = "adam"
+dp-momentum = 0.0
+class-weights = "local"
+# device for DP-SGD local training ("cpu" | "cuda"); Opacus per-sample gradients are ~15x faster on the GPU.
+device = "cpu"
 
 # Stage 15 — Secure Aggregation (ADR-3, ablation row 4). Only consumed when
 # [tool.flwr.app.components] is temporarily pointed at

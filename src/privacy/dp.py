@@ -24,7 +24,7 @@ from opacus import PrivacyEngine
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.models.densenet_head import DenseNet121Head
-from src.training.trainer import compute_class_weights
+from src.training.trainer import resolve_class_weights
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,26 @@ class DPConfig:
     target_epsilon: float
     target_delta: float
     max_grad_norm: float = 1.0
+
+
+def dp_training_loss(logits: torch.Tensor, y: torch.Tensor, class_weights: torch.Tensor, mode: str) -> torch.Tensor:
+    """Training loss for DP-SGD.
+
+    DP-SGD's sensitivity argument needs every per-sample gradient to be a function of
+    that sample alone. `"legacy_weighted_mean"` (the loss the original Stage 14 code and
+    the published ablation checkpoints used) is `F.cross_entropy(..., weight=w)` with
+    mean reduction, which divides by sum(w[y_j]) over the WHOLE batch — so one sample's
+    gradient is rescaled by whichever other samples share its batch (measured: a 60%
+    relative change in a sample's per-sample gradient when its batch companions swap
+    class; docs/audit_2026-10.md F4). Clipping hides this only for samples that are
+    clipped anyway. `"per_sample_mean"` computes mean_j(w[y_j] * ce_j) with a constant
+    normalizer, so per-sample gradients are batch-independent as the analysis requires.
+    """
+    if mode == "legacy_weighted_mean":
+        return F.cross_entropy(logits, y, weight=class_weights)
+    if mode == "per_sample_mean":
+        return (F.cross_entropy(logits, y, reduction="none") * class_weights[y]).mean()
+    raise ValueError(f"unknown dp loss mode {mode!r}")
 
 
 def make_privacy_engine() -> PrivacyEngine:
@@ -45,7 +65,7 @@ def _strip_opacus_prefix(state_dict: dict) -> dict:
     """Opacus's GradSampleModule wraps the module and prefixes every state_dict key
     with `_module.` — strip it so the resulting state dict loads cleanly into a plain
     (unwrapped) `DenseNet121Head.classifier`."""
-    return {k.removeprefix("_module."): v.clone() for k, v in state_dict.items()}
+    return {k.removeprefix("_module."): v.detach().cpu().clone() for k, v in state_dict.items()}
 
 
 def train_local_round_dp(
@@ -60,17 +80,33 @@ def train_local_round_dp(
     max_grad_norm: float,
     target_delta: float,
     privacy_engine: PrivacyEngine,
+    loss_mode: str = "legacy_weighted_mean",
+    class_weight_mode: str = "local",
+    optimizer: str = "adam",
+    momentum: float = 0.0,
+    device: str = "cpu",
 ) -> dict:
     """A DP-SGD local training round. `privacy_engine` must be the SAME object across
     every call for a given client across every round it participates in — that's what
     makes the accountant's spent-budget accumulate correctly across rounds instead of
-    silently resetting each time.
+    silently resetting each time. A stateless client (fresh engine per round) must restore
+    the accountant history first — see `src/privacy/accountant_state.py` (audit F11).
     """
     torch.manual_seed(seed)
     generator = torch.Generator().manual_seed(seed)
 
-    class_weights = compute_class_weights(train_labels)
-    opt = torch.optim.Adam(model.classifier.parameters(), lr=lr)
+    model.classifier.to(device)
+    class_weights = resolve_class_weights(train_labels, class_weight_mode).to(device)
+    if optimizer == "adam":
+        opt = torch.optim.Adam(model.classifier.parameters(), lr=lr)
+    elif optimizer == "sgd":
+        # Plain (momentum-free by default) SGD: Adam divides by the running RMS of the
+        # gradient, which under DP is dominated by injected noise, so every coordinate
+        # takes a full-size random step (audit F6). SGD's step scales with the actual
+        # noisy gradient, the standard DP-SGD choice.
+        opt = torch.optim.SGD(model.classifier.parameters(), lr=lr, momentum=momentum)
+    else:
+        raise ValueError(f"unknown optimizer {optimizer!r}")
 
     dataset = TensorDataset(train_features, train_labels)
     loader = DataLoader(dataset, batch_size=batch_size, generator=generator)
@@ -88,8 +124,9 @@ def train_local_round_dp(
     n_examples = 0
     for _ in range(local_epochs):
         for x, y in dp_loader:
+            x, y = x.to(device), y.to(device)
             out = dp_model(x)
-            loss = F.cross_entropy(out, y, weight=class_weights)
+            loss = dp_training_loss(out, y, class_weights, loss_mode)
             dp_opt.zero_grad()
             loss.backward()
             dp_opt.step()
