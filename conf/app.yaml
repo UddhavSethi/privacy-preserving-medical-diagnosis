@@ -51,12 +51,7 @@ ood_detector:
 # recalibration above), ~13x more wall-clock per federated round during
 # training (irrelevant to inference-time serving). See
 # docs/results.md/docs/calibration.md for the full comparison.
-# SWITCHED 2026-10-28 (owner-directed): fedavg_dp_eps4 -> fedavg_secagg_dp_eps4
-# (ablation row 6, the full system: FedAvg + SecAgg+ + DP eps=4; macro AUROC
-# 0.830 +- 0.010 over 3 seeds, vs 0.818 for the previous entry). To REVERT set
-# this back to fedavg_dp_eps4 -- that entry is unchanged below. See
-# docs/app_model_revert_note.md.
-active_configuration: fedavg_secagg_dp_eps4
+active_configuration: fedavg_dp_eps4
 
 # Real trained configurations only (CLAUDE.md's own governance: never expose an
 # option the backend doesn't actually support) — every entry below has a real
@@ -128,22 +123,6 @@ configurations:
     # permanent "Not available".
     deferral_threshold: 0.6728980541229248
     ood_artifacts_dir: outputs/app_artifacts/fedavg_dp_eps4
-  - key: fedavg_secagg_dp_eps4
-    label: "FedAvg + Secure Aggregation + DP (epsilon=4, full system)"
-    checkpoint: outputs/checkpoints/exp2026/secagg_dp_eps4_v2_seed42.pt
-    description: "Ablation row 6: Differential Privacy (epsilon=4) plus Secure Aggregation, trained with the validation-selected recipe."
-    privacy_preserving: true
-    # Row 6 checkpoint, seed 42 (best of the three seeds on validation pooled
-    # AUROC: 0.8564 vs 0.8335 / 0.8448). The _v2 set is the run with the
-    # corrected per-round privacy accounting (audit F11). Policy derived on
-    # validation data only with scripts/derive_app_decision_policy.py
-    # (2026-10-28): threshold swept on temperature-scaled probabilities.
-    # Calibration of this recipe was not measured on the test set.
-    decision_threshold: 0.25
-    temperature: 2.0611
-    abstention_half_width: 0.05
-    deferral_threshold: 0.6575309038162231
-    ood_artifacts_dir: outputs/app_artifacts/fedavg_secagg_dp_eps4
   - key: fedavg_dp_eps8
     label: "FedAvg + DP (epsilon=8, weakest privacy in sweep)"
     checkpoint: outputs/checkpoints/ablation/dp_eps8.0_seed42.pt
