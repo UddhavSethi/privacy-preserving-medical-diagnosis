@@ -626,7 +626,7 @@ Research/tests below are unaffected by any of this: 255 passing.
 **Update, 2026-10-26: scientific audit and re-evaluation.** A like-for-like re-evaluation (`docs/audit_2026-10.md`, generated tables
 `docs/audit_tables.md`, deployment evidence `docs/deployment_privacy_accounting_evidence.md`, session record `docs/session_context/`; commits
 `7187c04`, `bf59584`, `e2fe291`, pushed) corrected the paper's headline comparison, validated the DP implementation, found and fixed a
-privacy-accounting reporting defect, and measured ablation row 6 over three seeds — see resolved decision 17. Tests: 293 passing.
+privacy-accounting reporting defect, and measured ablation row 6 over three seeds — see resolved decision 17. Tests: 303 passing.
 
 | Item | Status |
 |---|---|
@@ -639,7 +639,7 @@ privacy-accounting reporting defect, and measured ablation row 6 over three seed
 | Code | All of Phases 0–5 (Stages 0–23) complete — the entire FL+DP+SecAgg+TLS+deployment core and the clinical trust layer are real, tested, and verified live; the full ablation campaign (Stage 21) ran 27/27 real live federated runs (3 seeds each) and produced the complete ablation table with real numbers for every row — local/centralized baselines, FedAvg (natural+balanced), FedAvg+SecAgg, FedAvg+DP (full epsilon sweep {1,2,4,8}, cleanly monotonic), and a supplementary Dirichlet synthetic non-IID sweep. Row 6 (full combined system) was first demonstrated live 2026-09-26 (resolved decision 14), measured over 3 seeds in simulation in the October 2026 audit (resolved decision 17, macro AUROC 0.830 ± 0.010), and verified over a six-round Docker/TLS deployment. Stage 22 audited the test suite against every CLAUDE.md §11.3 requirement (all already covered except the integration smoke test, now added) and added optional CI. Stage 23 produced the full documentation/reproducibility package (`README.md`, `docs/threat_model.md`, `docs/results.md`, `docs/reproducibility.md`, `docs/figures/`), including finding and fixing a real MLflow data-contamination bug in the integration smoke test. See `docs/SESSION_STATE.md` for current detail and the full table; this table is a coarse summary. |
 | Docker configuration | `docker/{Dockerfile.client,Dockerfile.server,docker-compose.yml}` — one SuperLink + three hospital containers, CPU-only (DG-9), real TLS + client auth, real per-hospital data isolation. Run via `scripts/run_deployment.sh`; the full system (SecAgg+ and DP) via `scripts/run_deployment_full_system.sh`. |
 | Deployed app | Live at `pneumonia-fl-demo.streamlit.app`. Redesigned frontend (resolved decision 16), single fixed active configuration `fedavg_dp_eps4` (real Differential Privacy, ε=4/δ=1e-5) — see resolved decision 16 for the switch and its real accuracy/calibration cost. |
-| Tests | 293 passing |
+| Tests | 303 passing |
 
 ### Resolved decisions
 
@@ -835,6 +835,15 @@ privacy-accounting reporting defect, and measured ablation row 6 over three seed
     supplementary result in `docs/results.md`, explicitly not comparable to
     the ablation table. The result bounds how much of the label-ambiguity
     limitation is trainable-away; most of it is not.
+
+    **Second follow-up (2026-10-26): subgroup-aware re-analysis and leakage audit
+    (`docs/rsna_label_ambiguity.md`; no training, no label changes).** The decision stands.
+    The filtered model's higher sensitivity at threshold 0.5 is a bias/operating-point shift
+    (validation-fitted logit intercept −1.12 vs −0.02), not better discrimination; at matched
+    validation specificity it is less sensitive than the all-data model. A versioned
+    ambiguity manifest (`data/manifests/rsna_ambiguity_manifest_v1.json`) tags every image with
+    its original RSNA class and changes no label. Label correction is not justified by the
+    available metadata (§15 item 13).
 
 14. **Ablation row 6 ("full system": FedAvg + SecAgg+ + DP + TLS/client-auth) —
     demonstrated for the first time (2026-09-26), exploratory single-run, not
@@ -1148,6 +1157,15 @@ To be stated honestly in the paper. Concealing these weakens credibility more th
 11. **Secure Aggregation at three clients is weak against collusion** (the aggregate minus two colluding hospitals' updates is the third's update), and TLS
     / node authentication are not exercised by the simulation-based measured rows — only by the Docker deployment (one six-round CPU run, single seed).
 12. **DP cost is uneven across hospitals:** the smallest hospital (A) loses most under DP (macro-AUROC 0.923 → 0.865 at ε = 4, seed spread 0.03–0.06).
+13. **RSNA negatives are heterogeneous, and Hospital A's labels mean something different.**
+    RSNA `Target = 0` includes "No Lung Opacity / Not Normal" (≈ 57 % of RSNA negatives; 1,761 of
+    the 4,838 test images), abnormal-but-not-pneumonia by RSNA's definition; Kermany labels are
+    clinical diagnoses. Full-test metrics therefore mix label semantics (e.g. specificity on the
+    hard negatives is 0.58–0.79 vs 0.92–0.99 on truly Normal images at the same threshold), and
+    subgroup results are reported alongside the full test set, which stays primary. The labels are
+    single image-based reads with no clinical records, so none can be verified or corrected here.
+    An exact-hash audit found no train/val/test duplicate; it does not cover near-duplicates, and
+    27 same-patient Kermany duplicate groups and one cross-hospital RSNA pair exist within splits.
 
 ---
 

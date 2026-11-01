@@ -336,6 +336,22 @@ model is therefore not a candidate replacement for the project's label harmoniza
 (DG-2) or for the deployed app model; it is reported to bound how much of the
 limitation is trainable-away.
 
+**Follow-up (2026-10-26): subgroup re-analysis, no new training.** Full record:
+`docs/rsna_label_ambiguity.md`. Same checkpoints and test set (n=4838, unchanged); all
+thresholds and temperatures fitted on validation data only, then frozen.
+- Filtering improves ranking on clear-label cases (AUROC 0.907 → 0.930) and lowers
+  full-test AUROC (0.8085 → 0.7803; float64, the 0.7799 above is float32 ties).
+- The sensitivity gain at threshold 0.5 (0.476 → 0.844) is an operating-point shift: the
+  validation-fitted logit intercept is −1.12 ± 0.02 for the filtered models vs −0.02 ± 0.08
+  for the all-data models. After a validation-only slope+intercept recalibration the filtered
+  model at 0.5 has sensitivity 0.408 / specificity 0.859 (was 0.844 / 0.616). At a matched
+  90 % validation specificity it is less sensitive than the all-data model (0.295 vs 0.417).
+- Temperature scaling repairs the all-data model (test ECE 0.196 → 0.029) but not the
+  filtered one (0.285 → 0.209), since a single temperature cannot remove a bias.
+- Not tested (needs training): whether the bias is caused by the shifted training prevalence
+  (49.9 % vs 31.8 % pneumonia) or by removing hard negatives; the two are confounded.
+- Exact-duplicate audit of all 32,540 images: no duplicate crosses train/val/test.
+
 ## 2026-10 audit and re-evaluation (supersedes the headline comparisons above)
 
 A scientific audit (`docs/audit_2026-10.md`, tables in `docs/audit_tables.md`, all regenerated from
